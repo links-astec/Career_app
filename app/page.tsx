@@ -1002,7 +1002,7 @@ export default function GCareers() {
 
                               {/* Next Q metadata */}
                               {!isUser && !!nextQuestion && (() => {
-                                const nq = meta.next_question as Record<string, unknown>;
+                                const nq = nextQuestion as Record<string, unknown>;
                                 return (
                                   <div style={{ maxWidth: '90%', marginTop: 5, display: 'flex', gap: 5 }}>
                                     <span style={{ padding: '2px 8px', background: 'rgba(77,159,255,.12)', borderRadius: 6, fontSize: '.6rem', color: 'var(--b)', fontFamily: 'var(--mono)' }}>{String(nq.category || '')}</span>
