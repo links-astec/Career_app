@@ -187,9 +187,9 @@ function Btn({ children, onClick, v = 'ghost', full, sm, disabled, style = {} }:
   );
 }
 
-function FInp({ val, set, ph, type = 'text', style = {} }: { val: string; set: (v: string) => void; ph?: string; type?: string; style?: React.CSSProperties }) {
+function FInp<T extends string>({ val, set, ph, type = 'text', style = {} }: { val: T; set: (v: T) => void; ph?: string; type?: string; style?: React.CSSProperties }) {
   return (
-    <input type={type} value={val} onChange={e => set(e.target.value)} placeholder={ph}
+    <input type={type} value={val} onChange={e => set(e.target.value as T)} placeholder={ph}
       style={{ ...C.inp(), ...style }}
       onFocus={e => { e.target.style.borderColor = 'var(--g)'; e.target.style.boxShadow = '0 0 0 3px rgba(0,255,170,.1)'; }}
       onBlur={e => { e.target.style.borderColor = 'var(--bdr2)'; e.target.style.boxShadow = 'none'; }}
@@ -197,9 +197,9 @@ function FInp({ val, set, ph, type = 'text', style = {} }: { val: string; set: (
   );
 }
 
-function FTA({ val, set, ph, rows = 4, style = {} }: { val: string; set: (v: string) => void; ph?: string; rows?: number; style?: React.CSSProperties }) {
+function FTA<T extends string>({ val, set, ph, rows = 4, style = {} }: { val: T; set: (v: T) => void; ph?: string; rows?: number; style?: React.CSSProperties }) {
   return (
-    <textarea value={val} onChange={e => set(e.target.value)} placeholder={ph} rows={rows}
+    <textarea value={val} onChange={e => set(e.target.value as T)} placeholder={ph} rows={rows}
       style={{ ...C.inp(), resize: 'vertical', minHeight: rows * 26, lineHeight: 1.5, ...style }}
       onFocus={e => { e.target.style.borderColor = 'var(--g)'; e.target.style.boxShadow = '0 0 0 3px rgba(0,255,170,.1)'; }}
       onBlur={e => { e.target.style.borderColor = 'var(--bdr2)'; e.target.style.boxShadow = 'none'; }}
@@ -207,10 +207,10 @@ function FTA({ val, set, ph, rows = 4, style = {} }: { val: string; set: (v: str
   );
 }
 
-function FSel({ val, set, opts, style = {} }: { val: string; set: (v: string) => void; opts: { value: string; label: string }[]; style?: React.CSSProperties }) {
+function FSel<T extends string>({ val, set, opts, style = {} }: { val: T; set: (v: T) => void; opts: { value: T; label: string }[]; style?: React.CSSProperties }) {
   return (
     <div style={{ position: 'relative', ...style }}>
-      <select value={val} onChange={e => set(e.target.value)}
+      <select value={val} onChange={e => set(e.target.value as T)}
         style={{ ...C.inp(), paddingRight: 36, WebkitAppearance: 'none', cursor: 'pointer' }}>
         {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
