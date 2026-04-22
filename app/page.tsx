@@ -984,7 +984,7 @@ export default function GCareers() {
                               }}>{msg.content}</div>
 
                               {/* Feedback block */}
-                              {!isUser && feedback && (() => {
+                              {!isUser && !!feedback && (() => {
                                 const fb = feedback as Record<string, any>;
                                 return (
                                   <div style={{ maxWidth: '96%', marginTop: 8, background: 'var(--bg3)', border: '1px solid var(--bdr2)', borderRadius: 12, padding: 12 }}>
@@ -1001,7 +1001,7 @@ export default function GCareers() {
                               })()}
 
                               {/* Next Q metadata */}
-                              {!isUser && meta?.next_question && (() => {
+                              {!isUser && !!nextQuestion && (() => {
                                 const nq = meta.next_question as Record<string, unknown>;
                                 return (
                                   <div style={{ maxWidth: '90%', marginTop: 5, display: 'flex', gap: 5 }}>
