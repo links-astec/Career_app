@@ -964,7 +964,16 @@ export default function GCareers() {
                       <div ref={ivChatRef} style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12, padding: '4px 0' }}>
                         {ivHistory.map((msg, i) => {
                           const isUser = msg.role === 'user';
-                          const meta = msg.meta;
+                          const meta = msg.meta as Record<string, unknown> | undefined;
+                          const feedback = meta?.feedback as Record<string, unknown> | undefined;
+                          const nextQuestion = meta?.next_question as Record<string, unknown> | undefined;
+                          const score = typeof feedback?.score === 'number' ? feedback.score : 0;
+                          const scoreLabel = typeof feedback?.scoreLabel === 'string' ? feedback.scoreLabel : '';
+                          const whatWentWell = Array.isArray(feedback?.what_went_well) ? feedback.what_went_well.filter((s): s is string => typeof s === 'string') : [];
+                          const improvements = Array.isArray(feedback?.improvements) ? feedback.improvements.filter((s): s is string => typeof s === 'string') : [];
+                          const modelAnswerHint = typeof feedback?.model_answer_hint === 'string' ? feedback.model_answer_hint : '';
+                          const nextCategory = typeof nextQuestion?.category === 'string' ? nextQuestion.category : '';
+                          const nextDifficulty = typeof nextQuestion?.difficulty === 'string' ? nextQuestion.difficulty : '';
                           return (
                             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
                               <div style={{
@@ -975,12 +984,12 @@ export default function GCareers() {
                               }}>{msg.content}</div>
 
                               {/* Feedback block */}
-                              {!isUser && meta?.feedback && (() => {
-                                const fb = meta.feedback as Record<string, unknown>;
+                              {!isUser && feedback && (() => {
+                                const fb = feedback as Record<string, any>;
                                 return (
                                   <div style={{ maxWidth: '96%', marginTop: 8, background: 'var(--bg3)', border: '1px solid var(--bdr2)', borderRadius: 12, padding: 12 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.65rem', color: scoreCol(fb.score as number) }}>
+                                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.65rem', color: scoreCol(score) }}>
                                         {lang === 'fr' ? 'Note' : 'Score'}: {String(fb.score)}/10 — {String(fb.scoreLabel || '')}
                                       </div>
                                     </div>
