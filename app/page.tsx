@@ -8,6 +8,7 @@ type JobStatus = 'saved' | 'applied' | 'interview' | 'offer' | 'rejected';
 type IVMode = 'technical' | 'behavioral' | 'mixed' | 'ml_deep';
 type SearchMode = 'general' | 'jobs' | 'company' | 'salary' | 'skills' | 'news';
 type IVInputMode = 'text' | 'voice';
+type Theme = 'dark' | 'light';
 
 interface Job {
   id: number; role: string; company: string; status: JobStatus;
@@ -345,6 +346,7 @@ function AISpeaking({ speaking }: { speaking: boolean }) {
 export default function GCareers() {
   const [page, setPage] = useState<Page>('home');
   const [lang, setLang] = useLS<Lang>('gc_lang', 'en');
+  const [theme, setTheme] = useLS<Theme>('gc_theme', 'dark');
   const [jobs, setJobs] = useLS<Job[]>('gc_jobs5', SEED_JOBS);
   const [topics, setTopics] = useLS<Topic[]>('gc_topics5', SEED_TOPICS);
   const [customQ, setCustomQ] = useLS<CustomQ[]>('gc_cq5', []);
@@ -828,10 +830,12 @@ export default function GCareers() {
         .md li{margin-bottom:4px;font-size:.78rem;color:var(--tx2)}
         .md a{color:var(--b);text-decoration:none}
         input[type='date']{color-scheme:dark}
+        .theme-light input[type='date']{color-scheme:light}
         *{-webkit-tap-highlight-color:transparent}
+        .theme-light{--bg:#f4f4f8;--bg2:#ffffff;--bg3:#eaeaf0;--sf:#ffffff;--sf2:#f0f0f6;--bdr:rgba(0,0,0,.08);--bdr2:rgba(0,0,0,.14);--tx:#0d0d1a;--tx2:#44445a;--tx3:#8888a0;}
       `}</style>
 
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', maxWidth: 480, margin: '0 auto', paddingTop: 'var(--st)', overflow: 'hidden', position: 'fixed', left: '50%', transform: 'translateX(-50%)' }}>
+      <div className={theme === 'light' ? 'theme-light' : ''} style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', maxWidth: 480, margin: '0 auto', paddingTop: 'var(--st)', overflow: 'hidden', position: 'fixed', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg)' }}>
 
         {/* ── HEADER ─────────────────────────────────────────────── */}
         <div style={{ height: 'var(--hh)', background: 'var(--bg2)', borderBottom: '1px solid var(--bdr)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10, flexShrink: 0, zIndex: 10 }}>
@@ -845,6 +849,9 @@ export default function GCareers() {
               </button>
             ))}
           </div>
+          <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid var(--bdr)', background: 'var(--sf)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,122,61,.1)', border: '1px solid rgba(255,122,61,.3)', borderRadius: 20, padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: '.58rem', color: 'var(--o)' }}>⚡ GROQ</div>
         </div>
 
@@ -1651,7 +1658,7 @@ export default function GCareers() {
               {ivTab === 'bank' && (
                 <>
                   <div style={{ display: 'flex', gap: 4, overflowX: 'auto', marginBottom: 14, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' as never }}>
-                    {(['technical', 'behavioral', 'ml'] as const).map(tab => (
+                    {(['technical', 'behavioral', 'ml'] as Array<keyof typeof QBANK>).map(tab => (
                       <button key={tab} onClick={() => setIvBankTab(tab)} style={{
                         padding: '7px 16px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
                         border: '1px solid var(--bdr)', background: ivBankTab === tab ? 'var(--b)' : 'transparent',
@@ -1886,14 +1893,14 @@ export default function GCareers() {
 
         </div>{/* /scroll */}
 
-        {/* FIX 5: Bottom nav — tabs pushed further down with increased paddingTop */}
+        {/* FIX 5: Bottom nav */}
         <nav style={{
-          height: 'calc(var(--nh) + var(--sb))',
           background: 'var(--bg2)',
           borderTop: '1px solid var(--bdr)',
           display: 'flex',
           alignItems: 'flex-start',
-          paddingTop: 22,
+          paddingTop: 10,
+          paddingBottom: 'calc(var(--sb) + 8px)',
           flexShrink: 0,
           zIndex: 100,
         }}>
