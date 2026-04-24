@@ -469,7 +469,8 @@ export default function GCareers() {
   const [ivVoiceActive, setIvVoiceActive] = useState(false);
   const [ivAISpeaking, setIvAISpeaking] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
-  const recognitionRef = useRef<{ stop: () => void; start: () => void; continuous: boolean; interimResults: boolean; lang: string; onstart: (() => void) | null; onresult: ((e: SpeechRecognitionEvent) => void) | null; onerror: (() => void) | null; onend: (() => void) | null } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const answerRef = useRef('');
   const ivHistoryRef = useRef<IVMessage[]>([]);
