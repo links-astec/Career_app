@@ -4,26 +4,40 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 type Page = 'home' | 'ats' | 'jobs' | 'interview' | 'study' | 'search' | 'cv';
 type Lang = 'en' | 'fr';
-type Theme = 'dark' | 'light';
 type JobStatus = 'saved' | 'applied' | 'interview' | 'offer' | 'rejected';
 type IVMode = 'technical' | 'behavioral' | 'mixed' | 'ml_deep';
 type SearchMode = 'general' | 'jobs' | 'company' | 'salary' | 'skills' | 'news';
+type IVInputMode = 'text' | 'voice';
 
-interface Job { id: number; role: string; company: string; status: JobStatus; ats: number | null; deadline: string; notes: string; url: string; }
+interface Job {
+  id: number; role: string; company: string; status: JobStatus;
+  ats: number | null; deadline: string; notes: string; url: string; lastATSDate?: string;
+}
 interface Topic { id: number; name: string; desc: string; progress: number; category: string; }
 interface CustomQ { id: number; question: string; answer: string; tags: string[]; }
 interface ATSResult {
-  score: number; keywords_score: number; skills_score: number; experience_score: number; format_score: number; education_match: number;
-  verdict: string; keywords_found: string[]; keywords_partial: string[]; keywords_missing: string[];
-  strengths: string[]; weaknesses: string[]; suggestions: string[]; recommendations: string; salary_estimate: string;
+  score: number; keywords_score: number; skills_score: number; experience_score: number;
+  format_score: number; education_match: number; verdict: string;
+  keywords_found: string[]; keywords_partial: string[]; keywords_missing: string[];
+  strengths: string[]; weaknesses: string[]; suggestions: string[];
+  recommendations: string; salary_estimate: string;
 }
 interface IVMessage { role: 'system' | 'user' | 'assistant'; content: string; meta?: Record<string, unknown>; }
+interface ATSHistoryEntry {
+  id: number;
+  result: ATSResult;
+  marketContext: { answer?: string; sources?: { title: string; url: string }[] } | null;
+  jobTitle: string;
+  company: string;
+  date: string;
+  cvSnippet?: string;
+}
 
 // ─── SEED DATA ───────────────────────────────────────────────────────────────
 const SEED_JOBS: Job[] = [
-  { id: 1, role: 'ML Engineer Intern', company: 'Thales', status: 'applied', ats: 82, deadline: '2026-05-01', notes: '', url: '' },
-  { id: 2, role: 'AI Research Intern', company: 'Inria', status: 'interview', ats: 76, deadline: '2026-05-10', notes: 'Interview scheduled May 5', url: '' },
-  { id: 3, role: 'Data Scientist Intern', company: 'Orange', status: 'saved', ats: null, deadline: '2026-04-25', notes: '', url: '' },
+  { id: 1, role: 'ML Engineer Intern', company: 'Thales', status: 'applied', ats: 82, deadline: '2026-05-01', notes: '', url: '', lastATSDate: new Date().toISOString() },
+  { id: 2, role: 'AI Research Intern', company: 'Inria', status: 'interview', ats: 76, deadline: '2026-05-10', notes: 'Interview scheduled May 5', url: '', lastATSDate: new Date().toISOString() },
+  { id: 3, role: 'Data Scientist Intern', company: 'Orange', status: 'saved', ats: null, deadline: '2026-05-25', notes: '', url: '' },
 ];
 
 const SEED_TOPICS: Topic[] = [
@@ -46,7 +60,7 @@ const QBANK = {
     { q: 'Tell me about a challenging project.', a: 'Use STAR: Situation, Task, Action, Result. Focus on your specific contribution, technical obstacles overcome, and measurable outcomes. Keep it under 2 minutes.', tags: ['STAR'] },
     { q: 'How do you handle ambiguous requirements?', a: 'Decompose into well-defined sub-problems, ask clarifying questions early, prototype quickly to validate assumptions, iterate based on feedback.', tags: ['Problem Solving'] },
     { q: 'Describe a time you learned something quickly.', a: 'Reference a course project or internship where you mastered a new framework/domain. Emphasize your learning process and the concrete result.', tags: ['Adaptability'] },
-    { q: 'Why do you want to work in AI/ML?', a: 'Connect personal passion to concrete examples: projects built, problems solved, academic trajectory at JUNIA. Link to the specific company\'s AI work.', tags: ['Motivation'] },
+    { q: 'Why do you want to work in AI/ML?', a: "Connect personal passion to concrete examples: projects built, problems solved, academic trajectory at JUNIA. Link to the specific company's AI work.", tags: ['Motivation'] },
   ],
   ml: [
     { q: 'Explain attention mechanism in Transformers.', a: 'Computes weighted sum of values via scaled dot-product of queries and keys. Multi-head attention runs parallel subspaces. Enables capturing long-range dependencies without recurrence.', tags: ['Transformers', 'NLP'] },
@@ -72,13 +86,13 @@ const T: Record<Lang, Record<string, string>> = {
     'search.salary': '💰 Salary', 'search.skills': '⚡ Skills', 'search.news': '📰 News',
   },
   fr: {
-    'home.sub': 'Votre carrière en un coup d\'œil',
+    'home.sub': "Votre carrière en un coup d'œil",
     'nav.home': 'Accueil', 'nav.ats': 'ATS', 'nav.jobs': 'Offres',
     'nav.iv': 'Entretiens', 'nav.study': 'Études', 'nav.search': 'Recherche',
     'status.saved': 'Sauvegardé', 'status.applied': 'Candidaté',
     'status.interview': 'Entretien', 'status.offer': 'Offre ✓', 'status.rejected': 'Refusé',
     'iv.mixed': 'Mixte', 'iv.technical': 'Technique', 'iv.behavioral': 'Comportemental', 'iv.ml_deep': 'ML Avancé',
-    'iv.start': 'Démarrer l\'entretien', 'iv.submit': 'Soumettre',
+    'iv.start': "Démarrer l'entretien", 'iv.submit': 'Soumettre',
     'iv.new': '↺ Nouvel entretien', 'iv.end': 'Terminer',
     'iv.practice': '🎤 Entretien IA', 'iv.bank': '📚 Banque',
     'search.general': '🔍 Général', 'search.jobs': '💼 Offres', 'search.company': '🏢 Entreprise',
@@ -89,6 +103,20 @@ const T: Record<Lang, Record<string, string>> = {
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const scoreCol = (s: number) => s >= 75 ? 'var(--g)' : s >= 55 ? 'var(--y)' : 'var(--r)';
 const TOPIC_COLS = ['var(--g)', 'var(--b)', 'var(--o)', 'var(--p)', '#ff6b9d', '#00d4ff'];
+
+// Parse YYYY-MM-DD in LOCAL time (avoid UTC off-by-one)
+const parseLocalDate = (dateStr: string): Date => {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  return new Date(y, mo - 1, d);
+};
+
+const getDaysUntil = (dateStr: string): number => {
+  if (!dateStr) return Infinity;
+  const target = parseLocalDate(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+};
 
 function md(text: string) {
   if (!text) return '';
@@ -123,7 +151,6 @@ function useLS<T>(key: string, init: T): [T, (v: T | ((prev: T) => T)) => void] 
 }
 
 // ─── SMALL COMPONENTS ────────────────────────────────────────────────────────
-
 const C = {
   card: (extra: React.CSSProperties = {}): React.CSSProperties => ({
     background: 'var(--sf)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', padding: 16, ...extra,
@@ -187,9 +214,9 @@ function Btn({ children, onClick, v = 'ghost', full, sm, disabled, style = {} }:
   );
 }
 
-function FInp<T extends string>({ val, set, ph, type = 'text', style = {} }: { val: T; set: (v: T) => void; ph?: string; type?: string; style?: React.CSSProperties }) {
+function FInp({ val, set, ph, type = 'text', style = {} }: { val: string; set: (v: string) => void; ph?: string; type?: string; style?: React.CSSProperties }) {
   return (
-    <input type={type} value={val} onChange={e => set(e.target.value as T)} placeholder={ph}
+    <input type={type} value={val} onChange={e => set(e.target.value)} placeholder={ph}
       style={{ ...C.inp(), ...style }}
       onFocus={e => { e.target.style.borderColor = 'var(--g)'; e.target.style.boxShadow = '0 0 0 3px rgba(0,255,170,.1)'; }}
       onBlur={e => { e.target.style.borderColor = 'var(--bdr2)'; e.target.style.boxShadow = 'none'; }}
@@ -197,9 +224,9 @@ function FInp<T extends string>({ val, set, ph, type = 'text', style = {} }: { v
   );
 }
 
-function FTA<T extends string>({ val, set, ph, rows = 4, style = {} }: { val: T; set: (v: T) => void; ph?: string; rows?: number; style?: React.CSSProperties }) {
+function FTA({ val, set, ph, rows = 4, style = {} }: { val: string; set: (v: string) => void; ph?: string; rows?: number; style?: React.CSSProperties }) {
   return (
-    <textarea value={val} onChange={e => set(e.target.value as T)} placeholder={ph} rows={rows}
+    <textarea value={val} onChange={e => set(e.target.value)} placeholder={ph} rows={rows}
       style={{ ...C.inp(), resize: 'vertical', minHeight: rows * 26, lineHeight: 1.5, ...style }}
       onFocus={e => { e.target.style.borderColor = 'var(--g)'; e.target.style.boxShadow = '0 0 0 3px rgba(0,255,170,.1)'; }}
       onBlur={e => { e.target.style.borderColor = 'var(--bdr2)'; e.target.style.boxShadow = 'none'; }}
@@ -207,10 +234,10 @@ function FTA<T extends string>({ val, set, ph, rows = 4, style = {} }: { val: T;
   );
 }
 
-function FSel<T extends string>({ val, set, opts, style = {} }: { val: T; set: (v: T) => void; opts: { value: T; label: string }[]; style?: React.CSSProperties }) {
+function FSel({ val, set, opts, style = {} }: { val: string; set: (v: string) => void; opts: { value: string; label: string }[]; style?: React.CSSProperties }) {
   return (
     <div style={{ position: 'relative', ...style }}>
-      <select value={val} onChange={e => set(e.target.value as T)}
+      <select value={val} onChange={e => set(e.target.value)}
         style={{ ...C.inp(), paddingRight: 36, WebkitAppearance: 'none', cursor: 'pointer' }}>
         {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -286,16 +313,44 @@ function QCard({ q, a, tags, onDelete }: { q: string; a: string; tags: string[];
   );
 }
 
+// ─── VOICE WAVE VISUALIZER ─────────────────────────────────────────────────
+function VoiceWave({ active }: { active: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, height: 32 }}>
+      {[1, 1.6, 2.2, 1.8, 1.3, 2.4, 1.5, 1.1, 2, 1.7].map((h, i) => (
+        <div key={i} style={{
+          width: 3, borderRadius: 10,
+          background: active ? 'var(--g)' : 'var(--bdr2)',
+          height: active ? `${h * 8}px` : '4px',
+          transition: 'height .15s ease',
+          animation: active ? `waveBar 0.8s ease ${i * 0.07}s infinite alternate` : 'none',
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ─── AI SPEAKING INDICATOR ────────────────────────────────────────────────
+function AISpeaking({ speaking }: { speaking: boolean }) {
+  if (!speaking) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(0,255,170,.07)', border: '1px solid rgba(0,255,170,.2)', borderRadius: 20, width: 'fit-content' }}>
+      <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--g)', animation: 'aiPulse 1s ease infinite' }} />
+      <span style={{ fontSize: '.7rem', color: 'var(--g)', fontFamily: 'var(--mono)', fontWeight: 600 }}>AI Speaking...</span>
+    </div>
+  );
+}
+
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 export default function GCareers() {
   const [page, setPage] = useState<Page>('home');
   const [lang, setLang] = useLS<Lang>('gc_lang', 'en');
-  const [theme, setTheme] = useState<Theme>('dark');
   const [jobs, setJobs] = useLS<Job[]>('gc_jobs5', SEED_JOBS);
   const [topics, setTopics] = useLS<Topic[]>('gc_topics5', SEED_TOPICS);
   const [customQ, setCustomQ] = useLS<CustomQ[]>('gc_cq5', []);
   const [bestATS, setBestATS] = useLS<number>('gc_ats5', 0);
   const [masterCV, setMasterCV] = useLS<string>('gc_cv5', '');
+  const [atsHistory, setAtsHistory] = useLS<ATSHistoryEntry[]>('gc_ats_hist', []);
 
   const [toast, setToast] = useState({ msg: '', show: false });
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -314,23 +369,6 @@ export default function GCareers() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   }, []);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('gc_theme');
-      const nextTheme: Theme = saved === '"light"' || saved === 'light'
-        ? 'light'
-        : saved === '"dark"' || saved === 'dark'
-          ? 'dark'
-          : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-      setTheme(nextTheme);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try { localStorage.setItem('gc_theme', theme); } catch { /* ignore */ }
-  }, [theme]);
-
   // ── ATS ──────────────────────────────────────────────────────────────
   const [cvText, setCvText] = useState('');
   const [jTitle, setJTitle] = useState('');
@@ -338,9 +376,10 @@ export default function GCareers() {
   const [jDesc, setJDesc] = useState('');
   const [jLang, setJLang] = useState('en');
   const [atsRes, setAtsRes] = useState<ATSResult | null>(null);
-  const [atsMkt, setAtsMkt] = useState<{answer?: string; sources?: {title:string;url:string}[]} | null>(null);
+  const [atsMkt, setAtsMkt] = useState<{ answer?: string; sources?: { title: string; url: string }[] } | null>(null);
   const [atsLoading, setAtsLoading] = useState(false);
-  const [atsView, setAtsView] = useState<'input' | 'result'>('input');
+  const [atsView, setAtsView] = useState<'input' | 'result' | 'history'>('input');
+  const [atsHistorySelected, setAtsHistorySelected] = useState<number | null>(null);
 
   const runATS = async () => {
     if (!cvText.trim() || !jDesc.trim()) { showToast('⚠ Add CV and job description'); return; }
@@ -352,18 +391,50 @@ export default function GCareers() {
       });
       const d = await r.json();
       if (d.result) {
-        setAtsRes(d.result); setAtsMkt(d.marketContext || null);
+        setAtsRes(d.result);
+        setAtsMkt(d.marketContext || null);
         setAtsView('result');
+        setAtsHistorySelected(null);
         if (d.result.score > bestATS) setBestATS(d.result.score);
+        const entry: ATSHistoryEntry = {
+          id: Date.now(),
+          result: d.result,
+          marketContext: d.marketContext || null,
+          jobTitle: jTitle,
+          company: jCo,
+          date: new Date().toLocaleDateString(),
+          cvSnippet: cvText.slice(0, 200),
+        };
+        setAtsHistory(prev => [entry, ...prev.slice(0, 19)]);
+        if (jTitle && jCo) {
+          setJobs(prev => prev.map(j =>
+            j.role.toLowerCase().includes(jTitle.toLowerCase()) && j.company.toLowerCase().includes(jCo.toLowerCase())
+              ? { ...j, ats: d.result.score, lastATSDate: new Date().toISOString() }
+              : j
+          ));
+        }
       } else showToast('⚠ Analysis failed — check your API keys');
     } catch { showToast('⚠ Network error'); }
     setAtsLoading(false);
   };
 
+  // FIX 3: Load ATS history entry — always fully re-reviews the stored result
+  const loadATSHistory = useCallback((id: number) => {
+    const entry = atsHistory.find(h => h.id === id);
+    if (!entry) return;
+    setAtsRes(entry.result);
+    setAtsMkt(entry.marketContext);
+    setJTitle(entry.jobTitle);
+    setJCo(entry.company);
+    setAtsHistorySelected(id);
+    setAtsView('result');
+    scrollRef.current?.scrollTo(0, 0);
+  }, [atsHistory]);
+
   // ── SEARCH ────────────────────────────────────────────────────────────
   const [sQuery, setSQuery] = useState('');
   const [sMode, setSMode] = useState<SearchMode>('general');
-  const [sResult, setSResult] = useState<{summary?: string; results?: {title:string;url:string;snippet:string;date?:string}[]} | null>(null);
+  const [sResult, setSResult] = useState<{ summary?: string; results?: { title: string; url: string; snippet: string; date?: string }[] } | null>(null);
   const [sLoading, setSLoading] = useState(false);
 
   const runSearch = async () => {
@@ -379,7 +450,7 @@ export default function GCareers() {
     setSLoading(false);
   };
 
-  // ── INTERVIEW ─────────────────────────────────────────────────────────
+  // ── INTERVIEW — micro1-style with full voice+text ─────────────────────
   const [ivRole, setIvRole] = useState('');
   const [ivCo, setIvCo] = useState('');
   const [ivMode, setIvMode] = useState<IVMode>('mixed');
@@ -393,12 +464,102 @@ export default function GCareers() {
   const [ivTab, setIvTab] = useState<'practice' | 'bank'>('practice');
   const [ivBankTab, setIvBankTab] = useState<keyof typeof QBANK>('technical');
 
-  const scrollIVChat = () => setTimeout(() => ivChatRef.current?.scrollTo(0, ivChatRef.current.scrollHeight), 120);
+  // FIX 4: Voice — dual mode with real speech recognition
+  const [ivInputMode, setIvInputMode] = useState<IVInputMode>('text');
+  const [ivVoiceActive, setIvVoiceActive] = useState(false);
+  const [ivAISpeaking, setIvAISpeaking] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const recognitionRef = useRef<{ stop: () => void; start: () => void; continuous: boolean; interimResults: boolean; lang: string; onstart: (() => void) | null; onresult: ((e: SpeechRecognitionEvent) => void) | null; onerror: (() => void) | null; onend: (() => void) | null } | null>(null);
+  const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const answerRef = useRef('');
+  const ivHistoryRef = useRef<IVMessage[]>([]);
+
+  // Keep refs in sync
+  useEffect(() => { answerRef.current = ivAnswer; }, [ivAnswer]);
+  useEffect(() => { ivHistoryRef.current = ivHistory; }, [ivHistory]);
+
+  const scrollIVChat = useCallback(() => {
+    setTimeout(() => {
+      if (ivChatRef.current) ivChatRef.current.scrollTop = ivChatRef.current.scrollHeight;
+    }, 120);
+  }, []);
+
+  // TTS — speak AI response aloud in voice mode
+  const speakText = useCallback((text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance(text.slice(0, 400));
+    utt.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
+    utt.rate = 0.95;
+    utt.pitch = 1;
+    utt.onstart = () => setIvAISpeaking(true);
+    utt.onend = () => { setIvAISpeaking(false); };
+    utt.onerror = () => setIvAISpeaking(false);
+    synthRef.current = utt;
+    window.speechSynthesis.speak(utt);
+  }, [lang]);
+
+  const stopSpeaking = useCallback(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIvAISpeaking(false);
+    }
+  }, []);
+
+  // STT — start voice recognition
+  const startVoice = useCallback(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { showToast('⚠ Voice not supported in this browser'); return; }
+    if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch { /* ignore */ } }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rec = new SR() as any;
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
+
+    let finalText = '';
+    rec.onstart = () => setIvVoiceActive(true);
+
+    rec.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+        else interim = e.results[i][0].transcript;
+      }
+      const combined = (finalText + interim).trim();
+      setVoiceTranscript(combined);
+      setIvAnswer(combined);
+    };
+
+    rec.onerror = () => { setIvVoiceActive(false); };
+    rec.onend = () => { setIvVoiceActive(false); };
+
+    rec.start();
+    recognitionRef.current = rec;
+    setIvVoiceActive(true);
+    setVoiceTranscript('');
+  }, [lang, showToast]);
+
+  const stopVoice = useCallback(() => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch { /* ignore */ }
+      recognitionRef.current = null;
+    }
+    setIvVoiceActive(false);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    stopVoice();
+    stopSpeaking();
+  }, [stopVoice, stopSpeaking]);
 
   const startIV = async () => {
     if (!ivRole.trim()) { showToast('⚠ Enter a target role'); return; }
     setIvLoading(true);
-    setIvHistory([]); setIvQNum(0); setIvFinal(null);
+    setIvHistory([]); setIvQNum(0); setIvFinal(null); setIvAnswer(''); setVoiceTranscript('');
     try {
       const r = await fetch('/api/interview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -411,35 +572,48 @@ export default function GCareers() {
         setIvQNum(1);
         setIvPhase('active');
         scrollIVChat();
+        // Auto-speak first question in voice mode
+        if (ivInputMode === 'voice') speakText(d.data.message || '');
       } else showToast('⚠ Failed to start — check API key');
     } catch { showToast('⚠ Network error'); }
     setIvLoading(false);
   };
 
   const submitIVAnswer = async () => {
-    if (!ivAnswer.trim()) { showToast('⚠ Type your answer first'); return; }
-    const userMsg: IVMessage = { role: 'user', content: ivAnswer };
-    const newHistory = [...ivHistory, userMsg];
+    const answer = answerRef.current.trim() || ivAnswer.trim();
+    if (!answer) { showToast('⚠ Provide an answer first'); return; }
+    if (ivVoiceActive) stopVoice();
+    stopSpeaking();
+
+    const userMsg: IVMessage = { role: 'user', content: answer };
+    const newHistory = [...ivHistoryRef.current, userMsg];
     setIvHistory(newHistory);
     setIvAnswer('');
+    setVoiceTranscript('');
     setIvLoading(true);
     scrollIVChat();
+
     try {
       const apiHist = newHistory.map(m => ({ role: m.role, content: m.content }));
       const r = await fetch('/api/interview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'answer', role: ivRole, company: ivCo, mode: ivMode, history: apiHist, userAnswer: ivAnswer, questionNumber: ivQNum, totalQuestions: ivTotal, lang }),
+        body: JSON.stringify({ action: 'answer', role: ivRole, company: ivCo, mode: ivMode, history: apiHist, userAnswer: answer, questionNumber: ivQNum, totalQuestions: ivTotal, lang }),
       });
       const d = await r.json();
       if (d.success) {
         const isLast = d.data.type === 'final_feedback';
-        const content = isLast ? (d.data.feedback?.model_answer_hint ? `Great, that completes our interview! Here's some final feedback on your last answer: ${d.data.feedback.model_answer_hint}` : 'That concludes the interview!') : (d.data.next_question?.message || '');
+        const content = isLast
+          ? (d.data.feedback?.model_answer_hint ? `That completes our interview! Final feedback: ${d.data.feedback.model_answer_hint}` : 'Interview complete! Generating your full report...')
+          : (d.data.next_question?.message || '');
         const aMsg: IVMessage = { role: 'assistant', content, meta: d.data };
         const finalHistory = [...newHistory, aMsg];
         setIvHistory(finalHistory);
+
+        // Auto-speak AI response in voice mode
+        if (ivInputMode === 'voice' && content) speakText(content);
+
         if (isLast) {
           setIvPhase('complete');
-          // Get full eval
           const evalR = await fetch('/api/interview', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'final', history: finalHistory.map(m => ({ role: m.role, content: m.content })), role: ivRole, company: ivCo, mode: ivMode, lang }),
@@ -455,12 +629,17 @@ export default function GCareers() {
     setIvLoading(false);
   };
 
+  const resetIV = () => {
+    setIvPhase('setup'); setIvFinal(null); setIvHistory([]); setIvQNum(0); setIvAnswer(''); setVoiceTranscript('');
+    stopVoice(); stopSpeaking();
+  };
+
   // ── STUDY ─────────────────────────────────────────────────────────────
   const [stQuery, setStQuery] = useState('');
   const [stLang, setStLang] = useState(lang);
-  const [stResult, setStResult] = useState<{explanation?: string; sources?: {title:string;url:string}[]} | null>(null);
+  const [stResult, setStResult] = useState<{ explanation?: string; sources?: { title: string; url: string }[] } | null>(null);
   const [stLoading, setStLoading] = useState(false);
-  const [quizData, setQuizData] = useState<{topic?: string; questions?: {question:string;options:string[];correct:string;explanation:string}[]} | null>(null);
+  const [quizData, setQuizData] = useState<{ topic?: string; questions?: { question: string; options: string[]; correct: string; explanation: string }[] } | null>(null);
   const [quizAns, setQuizAns] = useState<Record<number, string>>({});
   const [quizDone, setQuizDone] = useState(false);
 
@@ -558,6 +737,64 @@ export default function GCareers() {
   // ── STATS ─────────────────────────────────────────────────────────────
   const jStats = jobs.reduce((a, j) => ({ ...a, [j.status]: (a[j.status as keyof typeof a] || 0) + 1 }), {} as Record<string, number>);
 
+  // FIX 1: Recent Activity — properly typed, uses real atsHistory data
+  const buildActivity = useCallback((): Array<{ key: string; icon: string; bg: string; text: string; time: string }> => {
+    const entries: Array<{ key: string; icon: string; bg: string; text: string; time: string }> = [];
+
+    // ATS analyses from history
+    atsHistory.slice(0, 3).forEach((h) => {
+      entries.push({
+        key: `ats-${h.id}`,
+        icon: '◈',
+        bg: 'rgba(0,255,170,.1)',
+        text: lang === 'fr'
+          ? `Vérif ATS — ${h.jobTitle || 'CV'}${h.company ? ` @ ${h.company}` : ''} · Score: ${h.result.score}%`
+          : `ATS check — ${h.jobTitle || 'CV'}${h.company ? ` @ ${h.company}` : ''} · Score: ${h.result.score}%`,
+        time: h.date,
+      });
+    });
+
+    // Recent job status changes
+    const statusIconMap: Record<JobStatus, string> = { saved: '◎', applied: '◉', interview: '◇', offer: '✓', rejected: '✗' };
+    const statusBgMap: Record<JobStatus, string> = {
+      saved: 'rgba(77,159,255,.1)', applied: 'rgba(168,85,247,.1)',
+      interview: 'rgba(0,255,170,.1)', offer: 'rgba(0,255,170,.15)', rejected: 'rgba(255,77,109,.1)',
+    };
+    const statusLabelMap: Record<JobStatus, Record<Lang, string>> = {
+      saved: { en: 'Saved', fr: 'Sauvegardé' },
+      applied: { en: 'Applied to', fr: 'Candidature' },
+      interview: { en: 'Interview at', fr: 'Entretien chez' },
+      offer: { en: 'Offer from 🎉', fr: 'Offre de 🎉' },
+      rejected: { en: 'Rejected by', fr: 'Refusé par' },
+    };
+
+    [...jobs].reverse().slice(0, 4).forEach(j => {
+      const st = j.status;
+      entries.push({
+        key: `job-${j.id}`,
+        icon: statusIconMap[st],
+        bg: statusBgMap[st],
+        text: `${statusLabelMap[st][lang]} ${j.role} @ ${j.company}`,
+        time: j.deadline || '',
+      });
+    });
+
+    return entries.slice(0, 5);
+  }, [atsHistory, jobs, lang]);
+
+  // FIX 2: Upcoming deadlines — correct local date parsing, no UTC shift
+  const buildDeadlines = useCallback(() => {
+    return jobs
+      .filter(j => {
+        if (!j.deadline || j.status === 'rejected' || j.status === 'offer') return false;
+        const diff = getDaysUntil(j.deadline);
+        return diff >= 0; // today or future
+      })
+      .map(j => ({ ...j, diff: getDaysUntil(j.deadline) }))
+      .sort((a, b) => a.diff - b.diff)
+      .slice(0, 5);
+  }, [jobs]);
+
   // ─────────────────────────── RENDER ──────────────────────────────────
 
   const NAV = [
@@ -571,6 +808,27 @@ export default function GCareers() {
 
   return (
     <>
+      <style>{`
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes dotpulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+        @keyframes voicePulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.5)}70%{box-shadow:0 0 0 18px rgba(255,77,109,0)}}
+        @keyframes aiPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,255,170,.35)}70%{box-shadow:0 0 0 12px rgba(0,255,170,0)}}
+        @keyframes waveBar{from{transform:scaleY(1)}to{transform:scaleY(2.5)}}
+        @keyframes ripple{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.5);opacity:0}}
+        .md h1,.md h2{color:var(--g);font-family:var(--sans);font-weight:700;margin:12px 0 5px;font-size:.9rem}
+        .md h3{color:var(--b);font-size:.82rem;font-weight:700;margin:10px 0 4px;font-family:var(--sans)}
+        .md code{background:var(--sf2);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:.74rem;color:var(--g)}
+        .md pre{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rads);padding:12px;overflow-x:auto;margin:8px 0}
+        .md pre code{background:none;padding:0;color:var(--tx2);font-size:.72rem}
+        .md strong{color:var(--tx);font-weight:700}
+        .md ul{margin:6px 0 10px 16px}
+        .md li{margin-bottom:4px;font-size:.78rem;color:var(--tx2)}
+        .md a{color:var(--b);text-decoration:none}
+        input[type='date']{color-scheme:dark}
+        *{-webkit-tap-highlight-color:transparent}
+      `}</style>
+
       <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', maxWidth: 480, margin: '0 auto', paddingTop: 'var(--st)', overflow: 'hidden', position: 'fixed', left: '50%', transform: 'translateX(-50%)' }}>
 
         {/* ── HEADER ─────────────────────────────────────────────── */}
@@ -585,44 +843,6 @@ export default function GCareers() {
               </button>
             ))}
           </div>
-          <button
-            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 6px',
-              borderRadius: 20,
-              border: '1px solid var(--bdr)',
-              background: 'var(--sf)',
-              color: 'var(--tx2)',
-              cursor: 'pointer',
-              minWidth: 72,
-              transition: 'all .2s',
-            }}
-          >
-            <span style={{ fontFamily: 'var(--mono)', fontSize: '.58rem', letterSpacing: '.08em' }}>
-              {theme === 'dark' ? 'DARK' : 'LIGHT'}
-            </span>
-            <span style={{
-              marginLeft: 'auto',
-              width: 26,
-              height: 26,
-              borderRadius: '50%',
-              background: theme === 'dark' ? 'var(--g)' : 'var(--b)',
-              color: theme === 'dark' ? '#00150f' : '#fff',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '.7rem',
-              fontWeight: 800,
-              boxShadow: theme === 'dark' ? '0 0 18px rgba(0,255,170,.22)' : '0 0 18px rgba(47,124,246,.18)',
-            }}>
-              {theme === 'dark' ? 'D' : 'L'}
-            </span>
-          </button>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,122,61,.1)', border: '1px solid rgba(255,122,61,.3)', borderRadius: 20, padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: '.58rem', color: 'var(--o)' }}>⚡ GROQ</div>
         </div>
 
@@ -640,9 +860,10 @@ export default function GCareers() {
                 <Btn v="g" sm onClick={() => goPage('ats')}>+ ATS</Btn>
               </div>
 
+              {/* Stats grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
                 {[
-                  { val: bestATS > 0 ? `${bestATS}%` : '—', label: lang === 'fr' ? 'Meilleur ATS' : 'Best ATS Score', hint: lang === 'fr' ? 'dernière analyse' : 'last check', col: 'var(--g)' },
+                  { val: bestATS > 0 ? `${bestATS}%` : '—', label: lang === 'fr' ? 'Meilleur ATS' : 'Best ATS Score', hint: lang === 'fr' ? `${atsHistory.length} analyses` : `${atsHistory.length} analyses`, col: 'var(--g)' },
                   { val: jobs.length, label: lang === 'fr' ? 'Candidatures' : 'Applications', hint: `${jStats['interview'] || 0} ${lang === 'fr' ? 'entretiens' : 'interviews'}`, col: 'var(--b)' },
                   { val: Object.values(QBANK).flat().length + customQ.length, label: lang === 'fr' ? 'Questions' : 'Q Bank', hint: lang === 'fr' ? 'disponibles' : 'available', col: 'var(--o)' },
                   { val: topics.length, label: lang === 'fr' ? 'Sujets Études' : 'Study Topics', hint: `${topics.filter(t => t.progress >= 100).length} done`, col: 'var(--p)' },
@@ -656,40 +877,57 @@ export default function GCareers() {
                 ))}
               </div>
 
+              {/* FIX 1: Recent Activity */}
               <div style={C.card({ marginBottom: 12 })}>
                 <div style={C.label()}>{lang === 'fr' ? '// Activité Récente' : '// Recent Activity'}</div>
-                {[
-                  { icon: '◈', bg: 'rgba(0,255,170,.1)', text: lang === 'fr' ? 'Vérif ATS — Ingénieur ML @ Thales · 82%' : 'ATS check — ML Engineer @ Thales · 82%', time: '2h ago' },
-                  { icon: '◎', bg: 'rgba(77,159,255,.1)', text: lang === 'fr' ? 'Candidature Stagiaire Rech. IA @ Inria' : 'Applied — AI Research Intern @ Inria', time: lang === 'fr' ? 'Hier' : 'Yesterday' },
-                  { icon: '◇', bg: 'rgba(168,85,247,.1)', text: lang === 'fr' ? 'Pratiqué 4 questions entretien ML' : 'Practiced 4 ML interview questions', time: lang === 'fr' ? 'Il y a 2 jours' : '2 days ago' },
-                ].map((a, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 12, padding: '12px 0', borderBottom: i < 2 ? '1px solid var(--bdr)' : 'none' }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: a.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{a.icon}</div>
-                    <div>
-                      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', lineHeight: 1.4 }}>{a.text}</div>
-                      <div style={{ fontSize: '.62rem', color: 'var(--tx3)', marginTop: 3, fontFamily: 'var(--mono)' }}>{a.time}</div>
+                {(() => {
+                  const activities = buildActivity();
+                  if (activities.length === 0) return (
+                    <div style={{ fontSize: '.76rem', color: 'var(--tx3)', textAlign: 'center', padding: '12px 0' }}>
+                      {lang === 'fr' ? 'Aucune activité. Ajoutez des candidatures ou lancez une analyse ATS.' : 'No activity yet. Add applications or run an ATS analysis.'}
                     </div>
-                  </div>
-                ))}
+                  );
+                  return activities.map((a, i) => (
+                    <div key={a.key} style={{ display: 'flex', gap: 12, padding: '11px 0', borderBottom: i < activities.length - 1 ? '1px solid var(--bdr)' : 'none' }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: a.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{a.icon}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.4, wordBreak: 'break-word' }}>{a.text}</div>
+                        {a.time && <div style={{ fontSize: '.6rem', color: 'var(--tx3)', marginTop: 3, fontFamily: 'var(--mono)' }}>{a.time}</div>}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
 
+              {/* FIX 2: Upcoming Deadlines */}
               <div style={C.card()}>
                 <div style={C.label()}>{lang === 'fr' ? '// Échéances à Venir' : '// Upcoming Deadlines'}</div>
-                {jobs.filter(j => j.deadline).sort((a, b) => a.deadline.localeCompare(b.deadline)).slice(0, 4).map((j, i) => (
-                  <div key={j.id} style={{ display: 'flex', gap: 12, paddingBottom: 12, position: 'relative' }}>
-                    {i < 3 && <div style={{ position: 'absolute', left: 5, top: 14, bottom: 0, width: 1, background: 'var(--bdr)' }} />}
-                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: TOPIC_COLS[i], flexShrink: 0, marginTop: 3 }} />
-                    <div>
-                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.62rem', color: 'var(--tx3)' }}>{j.deadline}</div>
-                      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>{j.role} — {j.company}</div>
+                {(() => {
+                  const upcoming = buildDeadlines();
+                  if (upcoming.length === 0) return (
+                    <div style={{ fontSize: '.76rem', color: 'var(--tx3)', textAlign: 'center', padding: '12px 0' }}>
+                      {lang === 'fr' ? 'Aucune échéance à venir.' : 'No upcoming deadlines.'}
                     </div>
-                  </div>
-                ))}
-                {!jobs.some(j => j.deadline) && (
-                  <div style={{ fontSize: '.76rem', color: 'var(--tx3)', textAlign: 'center', padding: '12px 0' }}>
-                    {lang === 'fr' ? 'Aucune échéance. Ajoutez des candidatures.' : 'No deadlines yet. Add job applications.'}
-                  </div>
-                )}
+                  );
+                  return upcoming.map((j, i) => {
+                    const urgentColor = j.diff <= 1 ? 'var(--r)' : j.diff <= 7 ? 'var(--y)' : TOPIC_COLS[i % TOPIC_COLS.length];
+                    const daysLabel = j.diff === 0
+                      ? (lang === 'fr' ? "Aujourd'hui!" : 'Today!')
+                      : j.diff === 1
+                        ? (lang === 'fr' ? 'Demain' : 'Tomorrow')
+                        : lang === 'fr' ? `Dans ${j.diff}j` : `In ${j.diff}d`;
+                    return (
+                      <div key={j.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: i < upcoming.length - 1 ? '1px solid var(--bdr)' : 'none', alignItems: 'center' }}>
+                        <div style={{ width: 11, height: 11, borderRadius: '50%', background: urgentColor, flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '.78rem', color: 'var(--tx2)' }}>{j.role} — {j.company}</div>
+                          <div style={{ fontFamily: 'var(--mono)', fontSize: '.6rem', color: 'var(--tx3)', marginTop: 2 }}>{j.deadline}</div>
+                        </div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: '.64rem', fontWeight: 700, color: urgentColor, flexShrink: 0 }}>{daysLabel}</div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           )}
@@ -702,10 +940,59 @@ export default function GCareers() {
                   <div style={{ fontFamily: 'var(--sans)', fontSize: '1.4rem', fontWeight: 800 }}>ATS <span style={{ color: 'var(--g)' }}>Check</span></div>
                   <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 2 }}>{lang === 'fr' ? 'Analyse IA de votre CV' : 'AI-powered CV analysis'}</div>
                 </div>
-                {atsView === 'result' && <Btn v="ghost" sm onClick={() => setAtsView('input')}>← Back</Btn>}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {atsHistory.length > 0 && (
+                    <Btn v="ghost" sm onClick={() => setAtsView(v => v === 'history' ? 'input' : 'history')}>
+                      📋 {atsHistory.length}
+                    </Btn>
+                  )}
+                  {atsView !== 'input' && (
+                    <Btn v="ghost" sm onClick={() => { setAtsView('input'); setAtsHistorySelected(null); }}>
+                      ← {lang === 'fr' ? 'Nouvelle' : 'New'}
+                    </Btn>
+                  )}
+                </div>
               </div>
 
-              {atsView === 'input' ? (
+              {/* ── History list ── */}
+              {atsView === 'history' && (
+                <div style={{ animation: 'fadeUp .18s ease' }}>
+                  <div style={{ ...C.label(), marginBottom: 10 }}>📋 {lang === 'fr' ? 'Analyses Précédentes' : 'Previous Analyses'} — {lang === 'fr' ? 'Appuyez pour revoir' : 'Tap to re-review anytime'}</div>
+                  {atsHistory.length === 0 ? (
+                    <div style={{ fontSize: '.76rem', color: 'var(--tx3)', textAlign: 'center', padding: '24px 0' }}>
+                      {lang === 'fr' ? 'Aucune analyse. Lancez votre première!' : 'No analyses yet. Run your first!'}
+                    </div>
+                  ) : atsHistory.map(h => (
+                    <div key={h.id} onClick={() => loadATSHistory(h.id)}
+                      style={{ ...C.card({ marginBottom: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }) }}>
+                      <div style={{
+                        width: 52, height: 52, borderRadius: 12, flexShrink: 0,
+                        background: `rgba(${h.result.score >= 75 ? '0,255,170' : h.result.score >= 55 ? '255,214,10' : '255,77,109'},.1)`,
+                        border: `2px solid ${scoreCol(h.result.score)}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: '.82rem', fontWeight: 800, color: scoreCol(h.result.score) }}>{h.result.score}%</span>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '.84rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {h.jobTitle || (lang === 'fr' ? 'Poste non défini' : 'No title')}
+                        </div>
+                        <div style={{ fontSize: '.7rem', color: 'var(--tx3)', marginTop: 2 }}>{h.company || '—'} · {h.date}</div>
+                        <div style={{ fontSize: '.62rem', color: scoreCol(h.result.score), fontFamily: 'var(--mono)', marginTop: 3 }}>{h.result.verdict}</div>
+                      </div>
+                      <span style={{ color: 'var(--tx3)', fontSize: '.9rem' }}>→</span>
+                    </div>
+                  ))}
+                  {atsHistory.length > 0 && (
+                    <Btn v="danger" sm full onClick={() => { setAtsHistory([]); setAtsView('input'); showToast(lang === 'fr' ? '✓ Historique effacé' : '✓ History cleared'); }} style={{ marginTop: 8 }}>
+                      {lang === 'fr' ? "Effacer l'historique" : 'Clear History'}
+                    </Btn>
+                  )}
+                </div>
+              )}
+
+              {/* ── Input form ── */}
+              {atsView === 'input' && (
                 <>
                   <div style={C.card({ marginBottom: 12 })}>
                     <div style={C.label()}>{lang === 'fr' ? '// Votre CV' : '// Your CV'}</div>
@@ -744,8 +1031,26 @@ export default function GCareers() {
                     {atsLoading ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Analyse en cours...' : 'Analyzing...'}</> : `◈ ${lang === 'fr' ? 'Analyser le CV' : 'Analyze CV'}`}
                   </Btn>
                 </>
-              ) : atsRes && (
+              )}
+
+              {/* FIX 3: Result view — always re-reviewable, persistent from history */}
+              {atsView === 'result' && atsRes && (
                 <>
+                  {/* Banner when viewing from history */}
+                  {atsHistorySelected && (
+                    <div style={{ marginBottom: 10, padding: '10px 14px', background: 'rgba(77,159,255,.08)', border: '1px solid rgba(77,159,255,.25)', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: '1rem' }}>📋</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '.74rem', fontWeight: 600, color: 'var(--b)' }}>
+                          {lang === 'fr' ? 'Analyse archivée' : 'Archived Analysis'}
+                        </div>
+                        <div style={{ fontSize: '.65rem', color: 'var(--tx3)' }}>
+                          {atsHistory.find(h => h.id === atsHistorySelected)?.date} · {lang === 'fr' ? 'Toujours modifiable' : 'You can always re-run'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div style={C.card({ marginBottom: 12 })}>
                     <div style={C.label()}>{lang === 'fr' ? '// Score ATS Global' : '// Overall ATS Score'}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -832,14 +1137,23 @@ export default function GCareers() {
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Btn v="ghost" style={{ flex: 1 }} onClick={() => { if (jTitle && jCo) { setJobs(prev => [...prev, { id: Date.now(), role: jTitle, company: jCo, status: 'saved', ats: atsRes?.score || null, deadline: '', notes: '', url: '' }]); showToast(lang === 'fr' ? '✓ Sauvegardé' : '✓ Saved to tracker'); } else showToast('⚠ Set title & company first'); }}>
+                  {/* FIX 3: Action buttons — can always navigate back & re-run */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <Btn v="ghost" style={{ flex: 1 }} onClick={() => {
+                      if (jTitle && jCo) {
+                        setJobs(prev => [...prev, { id: Date.now(), role: jTitle, company: jCo, status: 'saved', ats: atsRes?.score || null, deadline: '', notes: '', url: '' }]);
+                        showToast(lang === 'fr' ? '✓ Sauvegardé' : '✓ Saved to tracker');
+                      } else showToast('⚠ Set title & company first');
+                    }}>
                       {lang === 'fr' ? 'Sauvegarder' : 'Save to Tracker'}
                     </Btn>
-                    <Btn v="ghost" style={{ flex: 1 }} onClick={() => { setAtsView('input'); setAtsRes(null); }}>
-                      {lang === 'fr' ? 'Nouvelle analyse' : 'New Check'}
+                    <Btn v="g" style={{ flex: 1 }} onClick={() => { setAtsView('input'); setAtsHistorySelected(null); }}>
+                      ◈ {lang === 'fr' ? 'Relancer' : 'Run Again'}
                     </Btn>
                   </div>
+                  <Btn v="ghost" full onClick={() => setAtsView('history')}>
+                    📋 {lang === 'fr' ? `Voir l'historique (${atsHistory.length})` : `View History (${atsHistory.length})`}
+                  </Btn>
                 </>
               )}
             </div>
@@ -886,13 +1200,34 @@ export default function GCareers() {
                     <Badge status={j.status} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: j.notes ? 8 : 10 }}>
-                    {j.ats && <span style={{ fontFamily: 'var(--mono)', fontSize: '.68rem', fontWeight: 700, color: scoreCol(j.ats) }}>{j.ats}% ATS</span>}
+                    {j.ats != null && (
+                      // FIX 3: Click ATS score → find & open history, or go to run new
+                      <button onClick={() => {
+                        const match = atsHistory.find(h =>
+                          (h.jobTitle && j.role.toLowerCase().includes(h.jobTitle.toLowerCase().slice(0, 6))) ||
+                          (h.company && j.company.toLowerCase().includes(h.company.toLowerCase().slice(0, 5)))
+                        );
+                        if (match) {
+                          loadATSHistory(match.id);
+                          goPage('ats');
+                        } else {
+                          setJTitle(j.role);
+                          setJCo(j.company);
+                          setAtsView('input');
+                          goPage('ats');
+                          showToast(lang === 'fr' ? 'Lancez une nouvelle analyse ATS' : 'Run a new ATS analysis');
+                        }
+                      }} style={{ fontFamily: 'var(--mono)', fontSize: '.68rem', fontWeight: 700, color: scoreCol(j.ats), cursor: 'pointer', background: 'none', border: 'none', padding: 0, textDecoration: 'underline dotted' }}>
+                        {j.ats}% ATS ↗
+                      </button>
+                    )}
                     {j.deadline && <span style={{ fontSize: '.66rem', color: 'var(--tx3)' }}>📅 {j.deadline}</span>}
                     {j.url && <a href={j.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '.66rem', color: 'var(--b)' }}>↗ Link</a>}
                   </div>
                   {j.notes && <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginBottom: 10, padding: '6px 8px', background: 'var(--bg3)', borderRadius: 6 }}>{j.notes}</div>}
                   <div style={{ display: 'flex', gap: 6 }}>
                     <Btn v="ghost" sm style={{ flex: 1 }} onClick={() => cycleStatus(j.id)}>⟳ {tr(`status.${j.status}`)}</Btn>
+                    <Btn v="ghost" sm onClick={() => { setJTitle(j.role); setJCo(j.company); setAtsView('input'); goPage('ats'); }}>◈ ATS</Btn>
                     <Btn v="danger" sm onClick={() => { setJobs(prev => prev.filter(x => x.id !== j.id)); showToast('Deleted'); }}>✕</Btn>
                   </div>
                 </div>
@@ -900,22 +1235,22 @@ export default function GCareers() {
             </div>
           )}
 
-          {/* ═══ INTERVIEW ══════════════════════════════════════════ */}
+          {/* ═══ INTERVIEW — full micro1-style with voice + text ════ */}
           {page === 'interview' && (
             <div style={{ padding: 16, animation: 'fadeUp .22s ease' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div>
                   <div style={{ fontFamily: 'var(--sans)', fontSize: '1.4rem', fontWeight: 800 }}>Interview <span style={{ color: 'var(--g)' }}>Prep</span></div>
-                  <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 2 }}>{lang === 'fr' ? 'Entretiens simulés & banque de questions' : 'AI mock interviews & question bank'}</div>
+                  <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 2 }}>{lang === 'fr' ? 'Entretien IA · Voix + Texte' : 'AI Interview · Voice + Text'}</div>
                 </div>
                 <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,122,61,.1)', border: '1px solid rgba(255,122,61,.3)', borderRadius: 20, padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: '.58rem', color: 'var(--o)' }}>⚡ GROQ</div>
               </div>
 
-              {/* Practice / Bank toggle */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
+              {/* Tab switcher */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
                 {([['practice', tr('iv.practice')], ['bank', tr('iv.bank')]] as [typeof ivTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setIvTab(id)} style={{
-                    padding: '7px 16px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer',
+                    padding: '8px 18px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer',
                     border: '1px solid var(--bdr)', background: ivTab === id ? 'var(--g)' : 'transparent',
                     color: ivTab === id ? '#000' : 'var(--tx3)', fontFamily: 'var(--sans)', transition: 'all .18s',
                   }}>{label}</button>
@@ -925,124 +1260,332 @@ export default function GCareers() {
               {/* ── PRACTICE TAB ── */}
               {ivTab === 'practice' && (
                 <>
+                  {/* ── SETUP PHASE ── */}
                   {ivPhase === 'setup' && (
-                    <div style={C.card()}>
-                      <div style={C.label()}>{lang === 'fr' ? '// Configurer l\'entretien' : '// Configure Interview'}</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <FInp val={ivRole} set={setIvRole} ph={lang === 'fr' ? 'Poste cible (ex: Ingénieur ML)' : 'Target role (e.g. ML Engineer)'} />
-                        <FInp val={ivCo} set={setIvCo} ph={lang === 'fr' ? 'Entreprise (optionnel)' : 'Company (optional)'} />
-                        <FSel val={ivMode} set={v => setIvMode(v as IVMode)} opts={[
-                          { value: 'mixed', label: tr('iv.mixed') + ' — ' + (lang === 'fr' ? 'Technique + Comportemental' : 'Technical + Behavioral') },
-                          { value: 'technical', label: tr('iv.technical') + ' — ' + (lang === 'fr' ? 'Questions techniques' : 'Technical depth') },
-                          { value: 'behavioral', label: tr('iv.behavioral') + ' — ' + (lang === 'fr' ? 'Questions STAR' : 'STAR format') },
-                          { value: 'ml_deep', label: tr('iv.ml_deep') + ' — ML/AI Theory' },
-                        ]} />
-                        <div style={{ padding: '8px 10px', background: 'var(--bg3)', borderRadius: 8, fontSize: '.72rem', color: 'var(--tx3)' }}>
-                          {lang === 'fr' ? `📋 ${ivTotal} questions · ~${ivTotal * 3} min · Feedback détaillé + Note 1-10 par réponse` : `📋 ${ivTotal} questions · ~${ivTotal * 3} min · Detailed feedback + Score 1-10 per answer`}
+                    <div style={{ animation: 'fadeUp .22s ease' }}>
+                      {/* Hero */}
+                      <div style={{ textAlign: 'center', padding: '20px 0 16px' }}>
+                        <div style={{ position: 'relative', width: 100, height: 100, margin: '0 auto 16px' }}>
+                          <div style={{ position: 'absolute', inset: -10, borderRadius: '50%', border: '2px solid rgba(0,255,170,.15)', animation: 'ripple 3s ease infinite' }} />
+                          <div style={{ position: 'absolute', inset: -5, borderRadius: '50%', border: '2px solid rgba(0,255,170,.2)', animation: 'ripple 3s ease .5s infinite' }} />
+                          <div style={{
+                            width: 100, height: 100, borderRadius: '50%', position: 'relative',
+                            background: 'linear-gradient(135deg, rgba(0,255,170,.12), rgba(77,159,255,.12))',
+                            border: '2px solid rgba(0,255,170,.4)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '2.6rem', animation: 'aiPulse 3s ease infinite',
+                          }}>🤖</div>
+                        </div>
+                        <div style={{ fontFamily: 'var(--sans)', fontSize: '1.1rem', fontWeight: 800 }}>
+                          {lang === 'fr' ? 'Votre Intervieweur IA' : 'Your AI Interviewer'}
+                        </div>
+                        <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 5, lineHeight: 1.6 }}>
+                          {lang === 'fr'
+                            ? `${ivTotal} questions · Feedback instantané · Voix ou Texte`
+                            : `${ivTotal} questions · Instant feedback · Voice or Text`}
                         </div>
                       </div>
-                      <div style={{ marginTop: 12 }}>
-                        <Btn v="g" full onClick={startIV} disabled={ivLoading}>
-                          {ivLoading ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Démarrage...' : 'Starting...'}</> : `🎤 ${tr('iv.start')}`}
-                        </Btn>
+
+                      <div style={C.card({ marginBottom: 12 })}>
+                        <div style={C.label()}>{lang === 'fr' ? '// Configurer la Session' : '// Configure Session'}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <FInp val={ivRole} set={setIvRole} ph={lang === 'fr' ? 'Poste cible (ex: Ingénieur ML)' : 'Target role (e.g. ML Engineer Intern)'} />
+                          <FInp val={ivCo} set={setIvCo} ph={lang === 'fr' ? 'Entreprise (optionnel)' : 'Company (optional)'} />
+                          <FSel val={ivMode} set={v => setIvMode(v as IVMode)} opts={[
+                            { value: 'mixed', label: tr('iv.mixed') + ' — Technical + Behavioral' },
+                            { value: 'technical', label: tr('iv.technical') + ' — Technical depth' },
+                            { value: 'behavioral', label: tr('iv.behavioral') + ' — STAR format' },
+                            { value: 'ml_deep', label: tr('iv.ml_deep') + ' — ML/AI Theory' },
+                          ]} />
+                        </div>
                       </div>
+
+                      {/* FIX 4: Input mode selector — voice or text */}
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ ...C.label(), marginBottom: 8 }}>{lang === 'fr' ? '// Mode de Réponse' : '// Response Mode'}</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {([
+                            ['text', '⌨️', lang === 'fr' ? 'Texte' : 'Text', lang === 'fr' ? 'Tapez vos réponses' : 'Type your answers'],
+                            ['voice', '🎤', lang === 'fr' ? 'Voix + IA Parle' : 'Voice + AI Speaks', lang === 'fr' ? 'Parlez — l\'IA répond oralement' : 'Speak — AI talks back'],
+                          ] as [IVInputMode, string, string, string][]).map(([id, emoji, label, sub]) => (
+                            <button key={id} onClick={() => setIvInputMode(id)} style={{
+                              padding: '16px 12px', borderRadius: 14, cursor: 'pointer', transition: 'all .18s', textAlign: 'left',
+                              border: `2px solid ${ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.6)' : 'rgba(77,159,255,.6)') : 'var(--bdr)'}`,
+                              background: ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.07)' : 'rgba(77,159,255,.07)') : 'var(--sf)',
+                            }}>
+                              <div style={{ fontSize: '1.6rem', marginBottom: 6 }}>{emoji}</div>
+                              <div style={{ fontSize: '.82rem', fontWeight: 700, color: ivInputMode === id ? (id === 'voice' ? 'var(--g)' : 'var(--b)') : 'var(--tx)' }}>{label}</div>
+                              <div style={{ fontSize: '.62rem', color: 'var(--tx3)', marginTop: 3, lineHeight: 1.4 }}>{sub}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Btn v="g" full onClick={startIV} disabled={ivLoading}>
+                        {ivLoading
+                          ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Démarrage...' : 'Starting...'}</>
+                          : `🎤 ${tr('iv.start')}`}
+                      </Btn>
                     </div>
                   )}
 
+                  {/* ── ACTIVE PHASE — micro1-style ── */}
                   {ivPhase === 'active' && (
-                    <>
-                      {/* Progress */}
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.68rem', color: 'var(--tx3)', marginBottom: 5, fontFamily: 'var(--mono)' }}>
-                          <span>{ivRole}{ivCo ? ` @ ${ivCo}` : ''}</span>
-                          <span>Q {ivQNum}/{ivTotal}</span>
+                    <div style={{ animation: 'fadeUp .18s ease' }}>
+                      {/* Session header */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <div style={{
+                          width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
+                          background: ivLoading ? 'rgba(0,255,170,.15)' : 'rgba(0,255,170,.08)',
+                          border: `2px solid ${ivLoading ? 'var(--g)' : 'rgba(0,255,170,.3)'}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem',
+                          animation: ivLoading ? 'aiPulse 1.2s ease infinite' : ivAISpeaking ? 'aiPulse 0.8s ease infinite' : 'none',
+                        }}>🤖</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '.8rem', fontWeight: 700 }}>{ivRole}{ivCo ? ` @ ${ivCo}` : ''}</div>
+                          <div style={{ fontSize: '.62rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
+                            Q{ivQNum}/{ivTotal} · {ivMode} · {ivInputMode === 'voice' ? '🎤' : '⌨️'}
+                          </div>
                         </div>
-                        <PBar val={(ivQNum / ivTotal) * 100} color="var(--g)" />
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {/* Toggle input mode mid-interview */}
+                          <button onClick={() => {
+                            const next: IVInputMode = ivInputMode === 'text' ? 'voice' : 'text';
+                            if (next === 'text') { stopVoice(); stopSpeaking(); }
+                            setIvInputMode(next);
+                          }} style={{
+                            width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--bdr2)',
+                            background: ivInputMode === 'voice' ? 'rgba(0,255,170,.1)' : 'var(--sf)',
+                            color: ivInputMode === 'voice' ? 'var(--g)' : 'var(--tx3)',
+                            cursor: 'pointer', fontSize: '.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {ivInputMode === 'voice' ? '🎤' : '⌨️'}
+                          </button>
+                          <button onClick={resetIV} style={{
+                            padding: '0 12px', height: 34, borderRadius: 8, border: '1px solid rgba(255,77,109,.25)',
+                            background: 'rgba(255,77,109,.08)', color: 'var(--r)', cursor: 'pointer', fontSize: '.7rem', fontWeight: 600,
+                          }}>{tr('iv.end')}</button>
+                        </div>
                       </div>
 
+                      {/* Progress bar */}
+                      <div style={{ marginBottom: 12 }}>
+                        <PBar val={(ivQNum / ivTotal) * 100} color="var(--g)" />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                          <span style={{ fontSize: '.56rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
+                            {ivQNum > 0 ? `Q${ivQNum} ${lang === 'fr' ? 'en cours' : 'in progress'}` : ''}
+                          </span>
+                          <span style={{ fontSize: '.56rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
+                            {Math.round((ivQNum / ivTotal) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* AI speaking indicator */}
+                      {ivAISpeaking && (
+                        <div style={{ marginBottom: 8 }}>
+                          <AISpeaking speaking={ivAISpeaking} />
+                        </div>
+                      )}
+
                       {/* Chat log */}
-                      <div ref={ivChatRef} style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12, padding: '4px 0' }}>
+                      <div ref={ivChatRef} style={{
+                        maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+                        gap: 14, marginBottom: 12, padding: '2px 0', scrollbarWidth: 'thin',
+                      }}>
                         {ivHistory.map((msg, i) => {
                           const isUser = msg.role === 'user';
-                          const meta = msg.meta as Record<string, unknown> | undefined;
-                          const feedback = meta?.feedback as Record<string, unknown> | undefined;
-                          const nextQuestion = meta?.next_question as Record<string, unknown> | undefined;
-                          const score = typeof feedback?.score === 'number' ? feedback.score : 0;
-                          const scoreLabel = typeof feedback?.scoreLabel === 'string' ? feedback.scoreLabel : '';
-                          const whatWentWell = Array.isArray(feedback?.what_went_well) ? feedback.what_went_well.filter((s): s is string => typeof s === 'string') : [];
-                          const improvements = Array.isArray(feedback?.improvements) ? feedback.improvements.filter((s): s is string => typeof s === 'string') : [];
-                          const modelAnswerHint = typeof feedback?.model_answer_hint === 'string' ? feedback.model_answer_hint : '';
-                          const nextCategory = typeof nextQuestion?.category === 'string' ? nextQuestion.category : '';
-                          const nextDifficulty = typeof nextQuestion?.difficulty === 'string' ? nextQuestion.difficulty : '';
+                          const meta = msg.meta;
                           return (
                             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexDirection: isUser ? 'row-reverse' : 'row' }}>
+                                <div style={{
+                                  width: 26, height: 26, borderRadius: '50%',
+                                  background: isUser ? 'rgba(77,159,255,.15)' : 'rgba(0,255,170,.12)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.75rem',
+                                  border: `1px solid ${isUser ? 'rgba(77,159,255,.3)' : 'rgba(0,255,170,.3)'}`,
+                                }}>{isUser ? '👤' : '🤖'}</div>
+                                <span style={{ fontSize: '.6rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
+                                  {isUser ? (lang === 'fr' ? 'Vous' : 'You') : 'AI Interviewer'}
+                                </span>
+                              </div>
+
                               <div style={{
-                                maxWidth: '90%', padding: '12px 14px', lineHeight: 1.6, fontSize: '.8rem',
-                                borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                                background: isUser ? 'var(--b)' : 'var(--sf)', border: isUser ? 'none' : '1px solid var(--bdr)',
-                                color: isUser ? '#fff' : 'var(--tx2)',
+                                maxWidth: '88%', padding: '13px 15px', lineHeight: 1.7, fontSize: '.82rem',
+                                borderRadius: isUser ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
+                                background: isUser ? 'rgba(77,159,255,.12)' : 'var(--sf)',
+                                border: isUser ? '1px solid rgba(77,159,255,.22)' : '1px solid var(--bdr)',
+                                color: isUser ? 'var(--tx)' : 'var(--tx2)',
                               }}>{msg.content}</div>
 
-                              {/* Feedback block */}
-                              {!isUser && !!feedback && (() => {
-                                const fb = feedback as Record<string, any>;
+                              {/* Question tags */}
+                              {(!isUser && !!meta?.next_question) ? (() => {
+                                const nq = meta!.next_question as Record<string, unknown>;
                                 return (
-                                  <div style={{ maxWidth: '96%', marginTop: 8, background: 'var(--bg3)', border: '1px solid var(--bdr2)', borderRadius: 12, padding: 12 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.65rem', color: scoreCol(score) }}>
-                                        {lang === 'fr' ? 'Note' : 'Score'}: {String(fb.score)}/10 — {String(fb.scoreLabel || '')}
+                                  <div style={{ maxWidth: '90%', marginTop: 5, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                    {!!nq.category && <span style={{ padding: '2px 9px', background: 'rgba(77,159,255,.1)', borderRadius: 20, fontSize: '.6rem', color: 'var(--b)', fontFamily: 'var(--mono)' }}>{String(nq.category)}</span>}
+                                    {!!nq.difficulty && <span style={{ padding: '2px 9px', background: 'rgba(168,85,247,.1)', borderRadius: 20, fontSize: '.6rem', color: 'var(--p)', fontFamily: 'var(--mono)' }}>{String(nq.difficulty)}</span>}
+                                    {!!nq.tips && <span style={{ padding: '2px 9px', background: 'rgba(255,214,10,.08)', borderRadius: 20, fontSize: '.6rem', color: 'var(--y)', fontFamily: 'var(--mono)', maxWidth: '100%' }}>💡 {String(nq.tips)}</span>}
+                                  </div>
+                                );
+                              })() : null}
+
+                              {/* Feedback card */}
+                              {(!isUser && !!meta?.feedback) ? (() => {
+                                const fb = meta!.feedback as Record<string, unknown>;
+                                const score = fb.score as number;
+                                return (
+                                  <div style={{ maxWidth: '96%', marginTop: 8, background: 'var(--bg3)', border: '1px solid var(--bdr2)', borderRadius: 14, padding: 13 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.65rem', color: scoreCol(score * 10), fontWeight: 700 }}>
+                                        {score}/10 — {String(fb.scoreLabel || '')}
+                                      </div>
+                                      <div style={{ flex: 1, display: 'flex', gap: 2 }}>
+                                        {Array.from({ length: 10 }).map((_, n) => (
+                                          <div key={n} style={{ flex: 1, height: 4, borderRadius: 2, background: n < score ? scoreCol(score * 10) : 'var(--bdr2)', transition: 'background .3s' }} />
+                                        ))}
                                       </div>
                                     </div>
-                                    {(fb.what_went_well as string[] || []).map((s, j) => <div key={j} style={{ fontSize: '.72rem', color: 'var(--g)', marginBottom: 3 }}>✓ {s}</div>)}
-                                    {(fb.improvements as string[] || []).map((s, j) => <div key={j} style={{ fontSize: '.72rem', color: 'var(--y)', marginBottom: 3 }}>▲ {s}</div>)}
-                                    {fb.model_answer_hint && <div style={{ fontSize: '.7rem', color: 'var(--tx3)', marginTop: 8, padding: '6px 8px', background: 'var(--sf2)', borderRadius: 6, borderLeft: '2px solid var(--b)' }}>💡 {String(fb.model_answer_hint)}</div>}
+                                    {(fb.what_went_well as string[] || []).map((s, j) => (
+                                      <div key={j} style={{ fontSize: '.72rem', color: 'var(--g)', marginBottom: 3, display: 'flex', gap: 5 }}><span>✓</span><span>{s}</span></div>
+                                    ))}
+                                    {(fb.improvements as string[] || []).map((s, j) => (
+                                      <div key={j} style={{ fontSize: '.72rem', color: 'var(--y)', marginBottom: 3, display: 'flex', gap: 5 }}><span>▲</span><span>{s}</span></div>
+                                    ))}
+                                    {!!fb.model_answer_hint && (
+                                      <div style={{ fontSize: '.7rem', color: 'var(--tx3)', marginTop: 8, padding: '8px 10px', background: 'var(--sf2)', borderRadius: 8, borderLeft: '2px solid var(--b)', lineHeight: 1.6 }}>
+                                        💡 {String(fb.model_answer_hint)}
+                                      </div>
+                                    )}
                                   </div>
                                 );
-                              })()}
-
-                              {/* Next Q metadata */}
-                              {!isUser && !!nextQuestion && (() => {
-                                const nq = nextQuestion as Record<string, unknown>;
-                                return (
-                                  <div style={{ maxWidth: '90%', marginTop: 5, display: 'flex', gap: 5 }}>
-                                    <span style={{ padding: '2px 8px', background: 'rgba(77,159,255,.12)', borderRadius: 6, fontSize: '.6rem', color: 'var(--b)', fontFamily: 'var(--mono)' }}>{String(nq.category || '')}</span>
-                                    <span style={{ padding: '2px 8px', background: 'rgba(168,85,247,.12)', borderRadius: 6, fontSize: '.6rem', color: 'var(--p)', fontFamily: 'var(--mono)' }}>{String(nq.difficulty || '')}</span>
-                                  </div>
-                                );
-                              })()}
+                              })() : null}
                             </div>
                           );
                         })}
-                        {ivLoading && <div style={{ paddingLeft: 4 }}><Dots /></div>}
+                        {ivLoading && (
+                          <div style={{ paddingLeft: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,255,170,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.75rem', border: '1px solid rgba(0,255,170,.3)', animation: 'aiPulse 1.2s ease infinite' }}>🤖</div>
+                            <Dots />
+                          </div>
+                        )}
                       </div>
 
-                      {/* Answer input */}
-                      {!ivLoading && (
-                        <>
-                          <FTA val={ivAnswer} set={setIvAnswer} ph={lang === 'fr' ? 'Tapez votre réponse ici...' : 'Type your answer here...'} rows={4} style={{ marginBottom: 8 }} />
+                      {/* ── TEXT MODE answer area ── */}
+                      {!ivLoading && ivInputMode === 'text' && (
+                        <div style={{ background: 'var(--sf)', border: '1px solid var(--bdr2)', borderRadius: 18, padding: 14 }}>
+                          <FTA
+                            val={ivAnswer}
+                            set={setIvAnswer}
+                            ph={lang === 'fr' ? 'Tapez votre réponse ici...' : 'Type your answer here...'}
+                            rows={3}
+                            style={{ marginBottom: 10, borderRadius: 12 }}
+                          />
                           <div style={{ display: 'flex', gap: 8 }}>
-                            <Btn v="g" style={{ flex: 1 }} onClick={submitIVAnswer} disabled={!ivAnswer.trim()}>{tr('iv.submit')} →</Btn>
-                            <Btn v="danger" sm onClick={() => { setIvPhase('setup'); setIvHistory([]); setIvQNum(0); }}>{tr('iv.end')}</Btn>
+                            <Btn v="ghost" sm onClick={() => setIvAnswer('')}>✕</Btn>
+                            <Btn v="g" style={{ flex: 1 }} onClick={submitIVAnswer} disabled={!ivAnswer.trim()}>
+                              {tr('iv.submit')} →
+                            </Btn>
                           </div>
-                        </>
+                        </div>
                       )}
-                    </>
+
+                      {/* FIX 4: VOICE MODE — micro1-style full voice UI */}
+                      {!ivLoading && ivInputMode === 'voice' && (
+                        <div style={{ background: 'var(--sf)', border: `1px solid ${ivVoiceActive ? 'rgba(255,77,109,.4)' : 'var(--bdr2)'}`, borderRadius: 20, padding: '20px 16px', transition: 'border-color .3s' }}>
+                          {/* Centered mic with ripple */}
+                          <div style={{ textAlign: 'center', marginBottom: 14 }}>
+                            <div style={{ position: 'relative', width: 90, height: 90, margin: '0 auto 12px' }}>
+                              {ivVoiceActive && (
+                                <>
+                                  <div style={{ position: 'absolute', inset: -8, borderRadius: '50%', border: '2px solid rgba(255,77,109,.3)', animation: 'ripple 1.2s ease infinite' }} />
+                                  <div style={{ position: 'absolute', inset: -4, borderRadius: '50%', border: '2px solid rgba(255,77,109,.4)', animation: 'ripple 1.2s ease .3s infinite' }} />
+                                </>
+                              )}
+                              <button
+                                onClick={ivVoiceActive ? stopVoice : startVoice}
+                                style={{
+                                  width: 90, height: 90, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                                  background: ivVoiceActive
+                                    ? 'radial-gradient(circle, rgba(255,77,109,.25), rgba(255,77,109,.1))'
+                                    : 'radial-gradient(circle, rgba(0,255,170,.15), rgba(0,255,170,.05))',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.2rem',
+                                  transition: 'all .25s',
+                                  animation: ivVoiceActive ? 'voicePulse 1.2s ease infinite' : 'none',
+                                  outline: 'none', position: 'relative',
+                                }}>
+                                {ivVoiceActive ? '⏹️' : '🎤'}
+                              </button>
+                            </div>
+
+                            {/* Status text */}
+                            <div style={{ fontSize: '.78rem', fontWeight: 700, color: ivVoiceActive ? 'var(--r)' : 'var(--tx3)', marginBottom: 8 }}>
+                              {ivVoiceActive
+                                ? (lang === 'fr' ? '🔴 En écoute...' : '🔴 Listening...')
+                                : ivAISpeaking
+                                  ? (lang === 'fr' ? '🤖 IA parle...' : '🤖 AI speaking...')
+                                  : (lang === 'fr' ? 'Appuyez pour parler' : 'Tap mic to speak')}
+                            </div>
+
+                            {/* Animated wave */}
+                            <VoiceWave active={ivVoiceActive} />
+                          </div>
+
+                          {/* Live transcript */}
+                          {(ivAnswer || voiceTranscript) && (
+                            <div style={{
+                              margin: '0 0 12px', padding: '10px 14px',
+                              background: 'var(--bg3)', borderRadius: 12,
+                              border: `1px solid ${ivVoiceActive ? 'rgba(255,77,109,.2)' : 'var(--bdr)'}`,
+                              fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.6,
+                              maxHeight: 80, overflowY: 'auto',
+                              transition: 'border-color .3s',
+                            }}>
+                              {ivAnswer || voiceTranscript}
+                              {ivVoiceActive && <span style={{ display: 'inline-block', width: 8, height: 14, background: 'var(--r)', borderRadius: 2, marginLeft: 3, animation: 'dotpulse 0.8s ease infinite', verticalAlign: 'middle' }} />}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Btn v="ghost" sm onClick={() => { setIvAnswer(''); setVoiceTranscript(''); stopVoice(); }} disabled={!ivAnswer && !voiceTranscript}>
+                              ✕ {lang === 'fr' ? 'Effacer' : 'Clear'}
+                            </Btn>
+                            <Btn v="g" style={{ flex: 1 }} onClick={submitIVAnswer} disabled={(!ivAnswer.trim() && !voiceTranscript.trim()) || ivVoiceActive}>
+                              {ivVoiceActive
+                                ? (lang === 'fr' ? 'Arrêtez puis envoyez' : 'Stop then submit')
+                                : `${tr('iv.submit')} →`}
+                            </Btn>
+                          </div>
+
+                          {ivVoiceActive && (
+                            <div style={{ textAlign: 'center', marginTop: 10, fontSize: '.65rem', color: 'var(--tx3)' }}>
+                              {lang === 'fr' ? 'Arrêtez l\'enregistrement pour pouvoir envoyer' : 'Stop recording first, then submit your answer'}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
 
+                  {/* ── COMPLETE PHASE ── */}
                   {ivPhase === 'complete' && (
                     <div style={C.card()}>
                       <div style={C.label()}>🏁 {lang === 'fr' ? 'Session Terminée' : 'Session Complete'}</div>
                       {!ivFinal ? (
-                        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                        <div style={{ textAlign: 'center', padding: '24px 0' }}>
                           <Dots />
-                          <div style={{ fontSize: '.76rem', color: 'var(--tx3)', marginTop: 8 }}>{lang === 'fr' ? 'Génération du rapport final...' : 'Generating your final report...'}</div>
+                          <div style={{ fontSize: '.76rem', color: 'var(--tx3)', marginTop: 10 }}>
+                            {lang === 'fr' ? 'Génération du rapport final...' : 'Generating your final report...'}
+                          </div>
                         </div>
                       ) : (
                         <>
-                          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                            <div style={{ fontSize: '3rem', fontWeight: 800, fontFamily: 'var(--sans)', color: scoreCol((ivFinal.overall_score as number) || 0) }}>{String(ivFinal.grade || 'B')}</div>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: 4 }}>{String(ivFinal.overall_score || 0)}%</div>
-                            <div style={{ fontSize: '.78rem', color: 'var(--tx3)', marginTop: 4 }}>{String(ivFinal.verdict || '')}</div>
+                          <div style={{ textAlign: 'center', marginBottom: 18, padding: '10px 0' }}>
+                            <div style={{ fontSize: '3.2rem', fontWeight: 800, fontFamily: 'var(--sans)', color: scoreCol((ivFinal.overall_score as number) || 0), lineHeight: 1 }}>
+                              {String(ivFinal.grade || 'B')}
+                            </div>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 4 }}>{String(ivFinal.overall_score || 0)}%</div>
+                            <div style={{ fontSize: '.78rem', color: 'var(--tx3)', marginTop: 6 }}>{String(ivFinal.verdict || '')}</div>
                           </div>
 
                           {ivFinal.category_scores && (
@@ -1057,30 +1600,30 @@ export default function GCareers() {
                             </div>
                           )}
 
-                          <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-                            <div style={{ flex: 1 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                            <div>
                               <div style={{ fontSize: '.62rem', color: 'var(--g)', fontFamily: 'var(--mono)', marginBottom: 6 }}>✓ {lang === 'fr' ? 'Forces' : 'Strengths'}</div>
                               {(ivFinal.top_strengths as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.74rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
                             </div>
-                            <div style={{ flex: 1 }}>
+                            <div>
                               <div style={{ fontSize: '.62rem', color: 'var(--o)', fontFamily: 'var(--mono)', marginBottom: 6 }}>▲ {lang === 'fr' ? 'À améliorer' : 'Improve'}</div>
                               {(ivFinal.priority_improvements as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.74rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
                             </div>
                           </div>
 
                           {ivFinal.coaching_summary && (
-                            <div style={{ fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.75, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 8, borderLeft: '2px solid var(--b)', marginBottom: 12 }}>
+                            <div style={{ fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.75, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 8, borderLeft: '2px solid var(--b)', marginBottom: 14 }}>
                               {String(ivFinal.coaching_summary)}
                             </div>
                           )}
 
                           {(ivFinal.study_topics as string[] || []).length > 0 && (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: '.62rem', color: 'var(--p)', fontFamily: 'var(--mono)', marginBottom: 6 }}>📚 {lang === 'fr' ? 'Sujets à réviser' : 'Study These Topics'}</div>
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: '.62rem', color: 'var(--p)', fontFamily: 'var(--mono)', marginBottom: 8 }}>📚 {lang === 'fr' ? 'Sujets à réviser' : 'Study These Topics'}</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                 {(ivFinal.study_topics as string[]).map((s, i) => (
                                   <button key={i} onClick={() => { setStQuery(s); goPage('study'); }}
-                                    style={{ padding: '4px 10px', borderRadius: 20, fontFamily: 'var(--mono)', fontSize: '.62rem', background: 'rgba(168,85,247,.1)', border: '1px solid rgba(168,85,247,.3)', color: 'var(--p)', cursor: 'pointer' }}>
+                                    style={{ padding: '5px 12px', borderRadius: 20, fontFamily: 'var(--mono)', fontSize: '.62rem', background: 'rgba(168,85,247,.1)', border: '1px solid rgba(168,85,247,.3)', color: 'var(--p)', cursor: 'pointer' }}>
                                     {s}
                                   </button>
                                 ))}
@@ -1089,14 +1632,12 @@ export default function GCareers() {
                           )}
 
                           {ivFinal.hiring_recommendation && (
-                            <div style={{ padding: '8px 12px', background: 'rgba(0,255,170,.05)', border: '1px solid rgba(0,255,170,.2)', borderRadius: 8, fontSize: '.74rem', color: 'var(--g)', marginBottom: 14 }}>
+                            <div style={{ padding: '9px 12px', background: 'rgba(0,255,170,.05)', border: '1px solid rgba(0,255,170,.2)', borderRadius: 10, fontSize: '.74rem', color: 'var(--g)', marginBottom: 14 }}>
                               🎯 {String(ivFinal.hiring_recommendation)}
                             </div>
                           )}
 
-                          <Btn v="g" full onClick={() => { setIvPhase('setup'); setIvFinal(null); setIvHistory([]); setIvQNum(0); }}>
-                            {tr('iv.new')}
-                          </Btn>
+                          <Btn v="g" full onClick={resetIV}>{tr('iv.new')}</Btn>
                         </>
                       )}
                     </div>
@@ -1119,10 +1660,12 @@ export default function GCareers() {
                     ))}
                   </div>
                   {QBANK[ivBankTab].map((q, i) => <QCard key={i} q={q.q} a={q.a} tags={q.tags} />)}
-                  {customQ.length > 0 && <>
-                    <div style={{ ...C.label(), marginTop: 16 }}>// {lang === 'fr' ? 'Questions Personnalisées' : 'Custom Questions'}</div>
-                    {customQ.map((q, i) => <QCard key={q.id} q={q.question} a={q.answer} tags={q.tags} onDelete={() => { setCustomQ(prev => prev.filter((_, j) => j !== i)); showToast('Deleted'); }} />)}
-                  </>}
+                  {customQ.length > 0 && (
+                    <>
+                      <div style={{ ...C.label(), marginTop: 16, marginBottom: 10 }}>// {lang === 'fr' ? 'Questions Personnalisées' : 'Custom Questions'}</div>
+                      {customQ.map((q, i) => <QCard key={q.id} q={q.question} a={q.answer} tags={q.tags} onDelete={() => { setCustomQ(prev => prev.filter((_, j) => j !== i)); showToast('Deleted'); }} />)}
+                    </>
+                  )}
                   <div style={C.card({ marginTop: 14 })}>
                     <div style={C.label()}>{lang === 'fr' ? '// Ajouter une Question' : '// Add Custom Question'}</div>
                     <FTA val={cqQ} set={setCqQ} ph={lang === 'fr' ? 'Votre question...' : 'Your question...'} rows={2} style={{ minHeight: 56, marginBottom: 8 }} />
@@ -1148,7 +1691,7 @@ export default function GCareers() {
               <div style={C.card({ marginBottom: 14 })}>
                 <div style={C.label()}>⚡ {lang === 'fr' ? 'Explication IA + Quiz' : 'AI Explainer + Quiz'}</div>
                 <FInp val={stQuery} set={setStQuery} ph={lang === 'fr' ? 'Transformer, Rétropropagation, RL...' : 'Transformer, Backprop, RL, BERT...'} style={{ marginBottom: 8 }} />
-                <FSel val={stLang} set={setStLang} opts={[{ value: 'en', label: 'English' }, { value: 'fr', label: 'Français' }]} style={{ marginBottom: 8 }} />
+                <FSel val={stLang} set={(v) => setStLang(v as Lang)} opts={[{ value: 'en', label: 'English' }, { value: 'fr', label: 'Français' }]} style={{ marginBottom: 8 }} />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Btn v="b" style={{ flex: 1 }} onClick={() => explainTopic()} disabled={stLoading}>
                     {stLoading ? <Dots /> : `📖 ${lang === 'fr' ? 'Expliquer' : 'Explain'}`}
@@ -1312,7 +1855,7 @@ export default function GCareers() {
                 <FInp val={cvTarget} set={setCvTarget} ph={lang === 'fr' ? 'Poste cible (ex: Ingénieur ML)' : 'Target role (e.g. ML Engineer)'} style={{ marginBottom: 8 }} />
                 <FTA val={cvSection} set={setCvSection} ph={lang === 'fr' ? 'Collez une section de votre CV à améliorer (expériences, projets, compétences)...' : 'Paste a CV section to improve (experience, projects, skills)...'} rows={5} style={{ marginBottom: 10 }} />
                 <Btn v="b" full onClick={improveCV} disabled={cvLoading}>
-                  {cvLoading ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Amélioration...' : 'Improving...'}</> : `✨ ${lang === 'fr' ? 'Améliorer avec l\'IA' : 'Improve with AI'}`}
+                  {cvLoading ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Amélioration...' : 'Improving...'}</> : `✨ ${lang === 'fr' ? "Améliorer avec l'IA" : 'Improve with AI'}`}
                 </Btn>
                 {cvImproved && (
                   <div style={{ marginTop: 12, padding: 12, background: 'var(--bg3)', border: '1px solid var(--bdr)', borderRadius: 'var(--rads)' }}>
@@ -1326,7 +1869,7 @@ export default function GCareers() {
                 {[
                   lang === 'fr' ? '✓ Utilisez des titres standards : Formation, Expérience, Compétences' : '✓ Use standard headings: Education, Experience, Skills',
                   lang === 'fr' ? '✓ Évitez tableaux, colonnes, zones de texte' : '✓ Avoid tables, columns, text boxes, graphics',
-                  lang === 'fr' ? '✓ Intégrez naturellement les mots-clés de l\'offre' : '✓ Naturally integrate job description keywords',
+                  lang === 'fr' ? "✓ Intégrez naturellement les mots-clés de l'offre" : '✓ Naturally integrate job description keywords',
                   lang === 'fr' ? '✓ Quantifiez chaque point : %, ms, €, utilisateurs' : '✓ Quantify every bullet: %, ms, €, users',
                   lang === 'fr' ? '✓ 1-2 pages pour les stages/premières expériences' : '✓ 1-2 pages for student/intern roles',
                   lang === 'fr' ? '✓ Format .docx ou PDF sans image pour l\'ATS' : '✓ Submit .docx or clean PDF without images for ATS',
@@ -1341,22 +1884,36 @@ export default function GCareers() {
 
         </div>{/* /scroll */}
 
-        {/* ── BOTTOM NAV ─────────────────────────────────────────── */}
-        <nav style={{ height: 'calc(var(--nh) + var(--sb))', background: 'var(--bg2)', borderTop: '1px solid var(--bdr)', display: 'flex', alignItems: 'flex-start', paddingTop: 8, flexShrink: 0, zIndex: 100 }}>
+        {/* FIX 5: Bottom nav — tabs pushed further down with increased paddingTop */}
+        <nav style={{
+          height: 'calc(var(--nh) + var(--sb))',
+          background: 'var(--bg2)',
+          borderTop: '1px solid var(--bdr)',
+          display: 'flex',
+          alignItems: 'flex-start',
+          paddingTop: 22,
+          flexShrink: 0,
+          zIndex: 100,
+        }}>
           {NAV.map(item => (
             <button key={item.id} onClick={() => goPage(item.id)} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              cursor: 'pointer', padding: '5px 2px', border: 'none', background: 'transparent', transition: 'all .18s',
+              cursor: 'pointer', padding: '0 2px', border: 'none', background: 'transparent', transition: 'all .18s',
               WebkitTapHighlightColor: 'transparent', userSelect: 'none', position: 'relative',
             }}>
-              <div style={{ width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', background: page === item.id ? 'rgba(0,255,170,.12)' : 'transparent', transition: 'all .2s' }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '1.15rem',
+                background: page === item.id ? 'rgba(0,255,170,.12)' : 'transparent',
+                transition: 'all .2s',
+              }}>
                 {item.icon}
               </div>
               <div style={{ fontSize: '.56rem', fontWeight: 600, color: page === item.id ? 'var(--g)' : 'var(--tx3)', transition: 'all .2s' }}>
                 {tr(item.key)}
               </div>
               {item.id === 'jobs' && jobs.length > 0 && (
-                <div style={{ position: 'absolute', top: 3, right: 'calc(50% - 22px)', background: 'var(--o)', color: '#fff', fontSize: '.5rem', fontWeight: 800, padding: '1px 4px', borderRadius: 8, minWidth: 14, textAlign: 'center', fontFamily: 'var(--mono)' }}>
+                <div style={{ position: 'absolute', top: -2, right: 'calc(50% - 24px)', background: 'var(--o)', color: '#fff', fontSize: '.5rem', fontWeight: 800, padding: '1px 4px', borderRadius: 8, minWidth: 14, textAlign: 'center', fontFamily: 'var(--mono)' }}>
                   {jobs.length}
                 </div>
               )}
@@ -1387,7 +1944,7 @@ export default function GCareers() {
         </Sheet>
 
         {/* ── TOPIC SHEET ────────────────────────────────────────── */}
-        <Sheet open={topicSheet} onClose={() => setTopicSheet(false)} title={lang === 'fr' ? 'Ajouter un sujet d\'étude' : 'Add Study Topic'}>
+        <Sheet open={topicSheet} onClose={() => setTopicSheet(false)} title={lang === 'fr' ? "Ajouter un sujet d'étude" : 'Add Study Topic'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <FInp val={tfName} set={setTfName} ph={lang === 'fr' ? 'Nom du sujet...' : 'Topic name...'} />
             <FTA val={tfDesc} set={setTfDesc} ph={lang === 'fr' ? 'Description...' : 'Description...'} rows={2} style={{ minHeight: 56 }} />
