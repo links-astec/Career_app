@@ -491,7 +491,7 @@ export default function GCareers() {
   const speakText = useCallback((text: string) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text.slice(0, 400));
+    const utt = new SpeechSynthesisUtterance(text.slice(0, 700));
     utt.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
     utt.rate = 0.95;
     utt.pitch = 1;
@@ -576,8 +576,8 @@ export default function GCareers() {
         setIvQNum(1);
         setIvPhase('active');
         scrollIVChat();
-        // Auto-speak first question in voice mode
-        if (ivInputMode === 'voice') speakText(d.data.message || '');
+        // Speak first question always
+        speakText(d.data.message || '');
       } else showToast('⚠ Failed to start — check API key');
     } catch { showToast('⚠ Network error'); }
     setIvLoading(false);
@@ -613,8 +613,8 @@ export default function GCareers() {
         const finalHistory = [...newHistory, aMsg];
         setIvHistory(finalHistory);
 
-        // Auto-speak AI response in voice mode
-        if (ivInputMode === 'voice' && content) speakText(content);
+        // Speak AI response always
+        if (content) speakText(content);
 
         if (isLast) {
           setIvPhase('complete');
@@ -832,10 +832,29 @@ export default function GCareers() {
         input[type='date']{color-scheme:dark}
         .theme-light input[type='date']{color-scheme:light}
         *{-webkit-tap-highlight-color:transparent}
-        .theme-light{--bg:#f4f4f8;--bg2:#ffffff;--bg3:#eaeaf0;--sf:#ffffff;--sf2:#f0f0f6;--bdr:rgba(0,0,0,.08);--bdr2:rgba(0,0,0,.14);--tx:#0d0d1a;--tx2:#44445a;--tx3:#8888a0;}
+        html,body{overscroll-behavior:none;overflow:hidden}
+        .theme-light{
+          --bg:#f0f2f7;
+          --bg2:#ffffff;
+          --bg3:#e4e8f2;
+          --sf:#ffffff;
+          --sf2:#eaecf5;
+          --bdr:rgba(0,0,0,.09);
+          --bdr2:rgba(0,0,0,.15);
+          --tx:#0a0a18;
+          --tx2:#3a3a5c;
+          --tx3:#7a7a9a;
+          --g:#009966;
+          --g2:#007755;
+          --b:#1a6fd4;
+          --o:#d45a00;
+          --p:#8020d0;
+          --r:#cc2244;
+          --y:#b88a00;
+        }
       `}</style>
 
-      <div className={theme === 'light' ? 'theme-light' : ''} style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', maxWidth: 480, margin: '0 auto', paddingTop: 'var(--st)', overflow: 'hidden', position: 'fixed', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg)' }}>
+      <div className={theme === 'light' ? 'theme-light' : ''} style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', maxWidth: 480, margin: '0 auto', paddingTop: 'var(--st)', overflow: 'hidden', position: 'fixed', left: '50%', transform: 'translateX(-50%)', background: 'var(--bg)', overscrollBehavior: 'none' }}>
 
         {/* ── HEADER ─────────────────────────────────────────────── */}
         <div style={{ height: 'var(--hh)', background: 'var(--bg2)', borderBottom: '1px solid var(--bdr)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10, flexShrink: 0, zIndex: 10 }}>
@@ -1893,16 +1912,17 @@ export default function GCareers() {
 
         </div>{/* /scroll */}
 
-        {/* FIX 5: Bottom nav */}
+        {/* Bottom nav — fixed to bottom, no bounce */}
         <nav style={{
           background: 'var(--bg2)',
           borderTop: '1px solid var(--bdr)',
           display: 'flex',
-          alignItems: 'flex-start',
-          paddingTop: 10,
-          paddingBottom: 'calc(var(--sb) + 8px)',
+          alignItems: 'center',
           flexShrink: 0,
           zIndex: 100,
+          minHeight: 60,
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          overscrollBehavior: 'none',
         }}>
           {NAV.map(item => (
             <button key={item.id} onClick={() => goPage(item.id)} style={{
