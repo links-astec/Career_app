@@ -3,145 +3,109 @@ import { NextRequest, NextResponse } from 'next/server';
 import { groqChat, GroqMessage } from '@/lib/groq';
 
 export type InterviewMode = 'technical' | 'behavioral' | 'mixed' | 'ml_deep';
-export type InterviewPhase = 'intro' | 'question' | 'followup' | 'feedback' | 'complete';
 
 export async function POST(req: NextRequest) {
   try {
     const {
-      action,          // 'start' | 'answer' | 'feedback' | 'end'
-      role,            // target job role
-      company,         // target company
-      mode,            // InterviewMode
-      history,         // GroqMessage[] — full conversation so far
-      userAnswer,      // candidate's answer to current question
-      questionNumber,  // current Q index
-      totalQuestions,  // total Q count (default 5)
-      lang,            // 'en' | 'fr'
-      cvSnippet,       // optional CV excerpt for context
+      action,
+      role,
+      company,
+      mode,
+      history,
+      userAnswer,
+      questionNumber,
+      totalQuestions,
+      lang,
+      cvSnippet,
     } = await req.json();
 
     const respondIn = lang === 'fr' ? 'French' : 'English';
     const total = totalQuestions || 6;
 
-    const SYSTEM = `You are an expert technical recruiter and interview coach conducting a mock interview for a student at JUNIA (French AI engineering school, Roubaix).
+    const SYSTEM = `You are a senior technical recruiter at ${company || 'a leading French tech company'} conducting a real job interview for a ${role || 'AI/ML Engineer Intern'} position. The candidate is a student at JUNIA engineering school in Roubaix, France.
 
-Role being interviewed for: ${role || 'AI/ML Engineer Intern'}
-Company: ${company || 'a French tech company'}
-Interview mode: ${mode || 'mixed'}
-${cvSnippet ? `Candidate CV snippet: ${cvSnippet.slice(0, 500)}` : ''}
+Interview mode: ${mode || 'mixed'} — ${mode === 'behavioral' ? 'STAR-format behavioral' : mode === 'technical' ? 'technical depth' : mode === 'ml_deep' ? 'deep ML/AI theory and practical' : 'mix of technical and behavioral'} questions.
+${cvSnippet ? `Candidate background: ${cvSnippet.slice(0, 400)}` : ''}
 
-You conduct structured, realistic interviews. You:
-- Ask one question at a time
-- Give detailed, constructive feedback on answers
-- Follow up intelligently on vague or incomplete answers  
-- Score answers from 1-10 with specific reasoning
-- Adapt difficulty to a student/intern level
-- Reference real France-specific context when relevant
-- Respond in ${respondIn}
+RULES — this must feel like a REAL interview conversation:
+- Speak naturally as a human interviewer: warm but professional
+- NEVER give scores, ratings, feedback boxes, or bullet points mid-interview
+- React briefly and naturally to what they said (1 sentence) before the next question
+- Examples of natural reactions: "That's an interesting approach.", "Right, and how would that scale?", "I see what you mean.", "Okay, moving on —"
+- You may ask one short follow-up if the answer is genuinely too vague
+- Keep ALL responses under 4 sentences — you're interviewing, not lecturing
+- This is a flowing conversation. Do NOT summarize their answer back to them
+- Respond entirely in ${respondIn}`;
 
-Interview structure: ${total} questions total, mix of ${mode === 'behavioral' ? 'behavioral STAR-format' : mode === 'technical' ? 'technical depth' : mode === 'ml_deep' ? 'deep ML theory and practical' : 'technical and behavioral'} questions.`;
-
-    // ── START: Begin interview ──
+    // ── START ──
     if (action === 'start') {
-      const intro = await groqChat(
-        [
-          { role: 'system', content: SYSTEM },
-          {
-            role: 'user',
-            content: `Start the interview. Introduce yourself briefly as the interviewer (1-2 sentences), set expectations (${total} questions, ~${total * 3} minutes), then ask Question 1/${total}. 
+      const res = await groqChat([
+        { role: 'system', content: SYSTEM },
+        {
+          role: 'user',
+          content: `Start the interview. In 2 sentences max: introduce yourself (first name + role), say you have ${total} questions, then immediately ask question 1. No fluff. Return JSON:
+{ "message": "full intro + first question text", "questionNumber": 1, "isFollowUp": false }`,
+        },
+      ], { json: true, maxTokens: 350, temperature: 0.85 });
 
-Format your response as JSON:
-{
-  "type": "question",
-  "message": "Your intro + first question here",
-  "questionNumber": 1,
-  "questionText": "Just the question itself",
-  "category": "Technical|Behavioral|ML Theory|Problem Solving",
-  "difficulty": "Easy|Medium|Hard",
-  "tips": "1 brief tip on how to approach this question type"
-}`,
-          },
-        ],
-        { json: true, maxTokens: 600, temperature: 0.8 }
-      );
-
-      const parsed = JSON.parse(intro);
-      return NextResponse.json({ success: true, data: parsed });
+      const parsed = JSON.parse(res);
+      return NextResponse.json({ success: true, data: { type: 'question', ...parsed } });
     }
 
-    // ── ANSWER: Process candidate's answer ──
+    // ── ANSWER ──
     if (action === 'answer') {
+      const isLast = questionNumber >= total;
+
       const messages: GroqMessage[] = [
         { role: 'system', content: SYSTEM },
         ...(history || []),
         {
           role: 'user',
-          content: `The candidate answered question ${questionNumber}/${total}: "${userAnswer}"
+          content: isLast
+            ? `Candidate just answered your last question (Q${questionNumber}/${total}): "${userAnswer}"
 
-Evaluate their answer and respond with JSON:
-{
-  "type": ${questionNumber >= total ? '"final_feedback"' : '"feedback_and_question"'},
-  "feedback": {
-    "score": 7,
-    "scoreLabel": "Good",
-    "what_went_well": ["Point 1", "Point 2"],
-    "improvements": ["Specific improvement 1", "Specific improvement 2"],
-    "model_answer_hint": "What a strong answer would include in 2-3 sentences",
-    "follow_up": "Optional follow-up question if answer was vague (or null)"
-  },
-  "next_question": ${questionNumber >= total ? 'null' : `{
-    "message": "Transition sentence + next question",
-    "questionNumber": ${questionNumber + 1},
-    "questionText": "Just the question itself",
-    "category": "Technical|Behavioral|ML Theory|Problem Solving",
-    "difficulty": "Easy|Medium|Hard",
-    "tips": "1 brief approach tip"
-  }`},
-  "sessionProgress": {
-    "questionsAnswered": ${questionNumber},
-    "totalQuestions": ${total}
-  }
-}
+React in 1-2 sentences naturally, then close the interview: thank them, say you'll be in touch. No feedback, no scores. Return JSON:
+{ "message": "closing message", "questionNumber": ${questionNumber}, "isFollowUp": false, "isComplete": true }`
+            : `Candidate answered Q${questionNumber}/${total}: "${userAnswer}"
 
-Be specific and constructive. Reference the candidate's actual answer in your feedback.`,
+React in 1 sentence (natural, neutral — no scoring/praise), then ask Q${questionNumber + 1}/${total}. If answer was genuinely too short/vague, ask a brief follow-up instead (set isFollowUp: true, keep questionNumber: ${questionNumber}). Return JSON:
+{ "message": "reaction + next question", "questionNumber": ${questionNumber + 1}, "isFollowUp": false }`,
         },
       ];
 
-      const response = await groqChat(messages, { json: true, maxTokens: 1000, temperature: 0.7 });
+      const response = await groqChat(messages, { json: true, maxTokens: 320, temperature: 0.82 });
       const parsed = JSON.parse(response);
-      return NextResponse.json({ success: true, data: parsed });
+      return NextResponse.json({
+        success: true,
+        data: { type: parsed.isComplete ? 'complete' : 'question', ...parsed },
+      });
     }
 
-    // ── FINAL: Full session evaluation ──
+    // ── FINAL DEBRIEF ──
     if (action === 'final') {
       const messages: GroqMessage[] = [
         { role: 'system', content: SYSTEM },
         ...(history || []),
         {
           role: 'user',
-          content: `Generate a comprehensive final evaluation of this mock interview session. Return JSON:
+          content: `Interview is over. Generate a thorough post-interview debrief based on the full conversation. Be specific — reference actual things the candidate said. Return JSON:
 {
-  "type": "session_complete",
   "overall_score": 72,
   "grade": "B+",
-  "verdict": "Ready for interviews with some prep needed",
-  "category_scores": {
-    "communication": 75,
-    "technical_knowledge": 70,
-    "problem_solving": 65,
-    "self_awareness": 80
-  },
-  "top_strengths": ["Strength 1", "Strength 2", "Strength 3"],
-  "priority_improvements": ["Critical improvement 1", "Critical improvement 2"],
-  "study_topics": ["Topic to review 1", "Topic to review 2", "Topic to review 3"],
-  "hiring_recommendation": "Would recommend for next round | Would not recommend | On the fence",
-  "coaching_summary": "2-3 paragraph detailed narrative coaching summary with specific advice for this role/company",
-  "next_steps": ["Actionable step 1", "Actionable step 2", "Actionable step 3"]
+  "verdict": "Strong candidate with some gaps",
+  "hire_signal": "Recommend for next round",
+  "category_scores": { "communication": 75, "technical_knowledge": 70, "problem_solving": 68, "confidence": 80 },
+  "top_strengths": ["Specific strength from their answers", "Another strength", "Third"],
+  "priority_improvements": ["Most critical gap with advice", "Second gap"],
+  "question_breakdown": [{ "q": "Short question summary", "rating": "Strong", "note": "One observation" }],
+  "study_topics": ["Topic 1", "Topic 2", "Topic 3"],
+  "coaching_summary": "3-4 sentence personal coaching note referencing specific things they actually said in this interview",
+  "next_steps": ["Concrete action 1", "Concrete action 2"]
 }`,
         },
       ];
 
-      const response = await groqChat(messages, { json: true, maxTokens: 1200, temperature: 0.6 });
+      const response = await groqChat(messages, { json: true, maxTokens: 1400, temperature: 0.6 });
       const parsed = JSON.parse(response);
       return NextResponse.json({ success: true, data: parsed });
     }

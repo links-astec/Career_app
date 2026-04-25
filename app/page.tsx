@@ -571,12 +571,11 @@ export default function GCareers() {
       });
       const d = await r.json();
       if (d.success) {
-        const msg: IVMessage = { role: 'assistant', content: d.data.message || '', meta: d.data };
+        const msg: IVMessage = { role: 'assistant', content: d.data.message || '' };
         setIvHistory([msg]);
         setIvQNum(1);
         setIvPhase('active');
         scrollIVChat();
-        // Speak first question always
         speakText(d.data.message || '');
       } else showToast('⚠ Failed to start — check API key');
     } catch { showToast('⚠ Network error'); }
@@ -605,26 +604,25 @@ export default function GCareers() {
       });
       const d = await r.json();
       if (d.success) {
-        const isLast = d.data.type === 'final_feedback';
-        const content = isLast
-          ? (d.data.feedback?.model_answer_hint ? `That completes our interview! Final feedback: ${d.data.feedback.model_answer_hint}` : 'Interview complete! Generating your full report...')
-          : (d.data.next_question?.message || '');
-        const aMsg: IVMessage = { role: 'assistant', content, meta: d.data };
+        const isComplete = d.data.type === 'wrap_up' || d.data.sessionComplete === true;
+        // isFollowUp: keep question counter the same
+        const isFollowUp = d.data.isFollowUp === true;
+        const content = d.data.message || '';
+        const aMsg: IVMessage = { role: 'assistant', content };
         const finalHistory = [...newHistory, aMsg];
         setIvHistory(finalHistory);
-
-        // Speak AI response always
         if (content) speakText(content);
 
-        if (isLast) {
+        if (isComplete) {
           setIvPhase('complete');
+          // fetch full debrief
           const evalR = await fetch('/api/interview', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'final', history: finalHistory.map(m => ({ role: m.role, content: m.content })), role: ivRole, company: ivCo, mode: ivMode, lang }),
           });
           const evalD = await evalR.json();
           if (evalD.success) setIvFinal(evalD.data);
-        } else {
+        } else if (!isFollowUp) {
           setIvQNum(n => n + 1);
         }
         scrollIVChat();
@@ -637,6 +635,7 @@ export default function GCareers() {
     setIvPhase('setup'); setIvFinal(null); setIvHistory([]); setIvQNum(0); setIvAnswer(''); setVoiceTranscript('');
     stopVoice(); stopSpeaking();
   };
+
 
   // ── STUDY ─────────────────────────────────────────────────────────────
   const [stQuery, setStQuery] = useState('');
@@ -875,7 +874,7 @@ export default function GCareers() {
         </div>
 
         {/* ── SCROLL ─────────────────────────────────────────────── */}
-        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch' as never, paddingBottom: 'calc(var(--nh) + var(--sb) + 16px)' }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: page === 'interview' && ivPhase === 'active' ? 'hidden' : 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch' as never, paddingBottom: page === 'interview' && ivPhase === 'active' ? 0 : 16, display: 'flex', flexDirection: 'column' }}>
 
           {/* ═══ HOME ═══════════════════════════════════════════════ */}
           {page === 'home' && (
@@ -1263,22 +1262,25 @@ export default function GCareers() {
             </div>
           )}
 
-          {/* ═══ INTERVIEW — full micro1-style with voice + text ════ */}
+          {/* ═══ INTERVIEW ══════════════════════════════════════════ */}
           {page === 'interview' && (
-            <div style={{ padding: 16, animation: 'fadeUp .22s ease' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div style={{ padding: ivPhase === 'active' ? '16px 16px 0' : 16, animation: 'fadeUp .22s ease', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexShrink: 0 }}>
                 <div>
-                  <div style={{ fontFamily: 'var(--sans)', fontSize: '1.4rem', fontWeight: 800 }}>Interview <span style={{ color: 'var(--g)' }}>Prep</span></div>
-                  <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 2 }}>{lang === 'fr' ? 'Entretien IA · Voix + Texte' : 'AI Interview · Voice + Text'}</div>
+                  <div style={{ fontFamily: 'var(--sans)', fontSize: '1.2rem', fontWeight: 800 }}>Interview <span style={{ color: 'var(--g)' }}>Prep</span></div>
                 </div>
-                <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,122,61,.1)', border: '1px solid rgba(255,122,61,.3)', borderRadius: 20, padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: '.58rem', color: 'var(--o)' }}>⚡ GROQ</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,122,61,.1)', border: '1px solid rgba(255,122,61,.3)', borderRadius: 20, padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: '.58rem', color: 'var(--o)' }}>⚡ GROQ</div>
+                </div>
               </div>
 
               {/* Tab switcher */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 14, flexShrink: 0 }}>
                 {([['practice', tr('iv.practice')], ['bank', tr('iv.bank')]] as [typeof ivTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setIvTab(id)} style={{
-                    padding: '8px 18px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer',
+                    padding: '7px 16px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer',
                     border: '1px solid var(--bdr)', background: ivTab === id ? 'var(--g)' : 'transparent',
                     color: ivTab === id ? '#000' : 'var(--tx3)', fontFamily: 'var(--sans)', transition: 'all .18s',
                   }}>{label}</button>
@@ -1287,307 +1289,157 @@ export default function GCareers() {
 
               {/* ── PRACTICE TAB ── */}
               {ivTab === 'practice' && (
-                <>
-                  {/* ── SETUP PHASE ── */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+                  {/* ── SETUP ── */}
                   {ivPhase === 'setup' && (
-                    <div style={{ animation: 'fadeUp .22s ease' }}>
-                      {/* Hero */}
-                      <div style={{ textAlign: 'center', padding: '20px 0 16px' }}>
-                        <div style={{ position: 'relative', width: 100, height: 100, margin: '0 auto 16px' }}>
-                          <div style={{ position: 'absolute', inset: -10, borderRadius: '50%', border: '2px solid rgba(0,255,170,.15)', animation: 'ripple 3s ease infinite' }} />
-                          <div style={{ position: 'absolute', inset: -5, borderRadius: '50%', border: '2px solid rgba(0,255,170,.2)', animation: 'ripple 3s ease .5s infinite' }} />
-                          <div style={{
-                            width: 100, height: 100, borderRadius: '50%', position: 'relative',
-                            background: 'linear-gradient(135deg, rgba(0,255,170,.12), rgba(77,159,255,.12))',
-                            border: '2px solid rgba(0,255,170,.4)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '2.6rem', animation: 'aiPulse 3s ease infinite',
-                          }}>🤖</div>
+                    <div style={{ overflowY: 'auto', flex: 1 }}>
+                      <div style={{ textAlign: 'center', padding: '16px 0 14px' }}>
+                        <div style={{ position: 'relative', width: 80, height: 80, margin: '0 auto 12px' }}>
+                          <div style={{ position: 'absolute', inset: -8, borderRadius: '50%', border: '2px solid rgba(0,255,170,.15)', animation: 'ripple 3s ease infinite' }} />
+                          <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(0,255,170,.12),rgba(77,159,255,.12))', border: '2px solid rgba(0,255,170,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.2rem', animation: 'aiPulse 3s ease infinite' }}>🤖</div>
                         </div>
-                        <div style={{ fontFamily: 'var(--sans)', fontSize: '1.1rem', fontWeight: 800 }}>
-                          {lang === 'fr' ? 'Votre Intervieweur IA' : 'Your AI Interviewer'}
-                        </div>
-                        <div style={{ fontSize: '.72rem', color: 'var(--tx3)', marginTop: 5, lineHeight: 1.6 }}>
-                          {lang === 'fr'
-                            ? `${ivTotal} questions · Feedback instantané · Voix ou Texte`
-                            : `${ivTotal} questions · Instant feedback · Voice or Text`}
-                        </div>
+                        <div style={{ fontFamily: 'var(--sans)', fontSize: '1rem', fontWeight: 800 }}>{lang === 'fr' ? 'Votre Intervieweur IA' : 'Your AI Interviewer'}</div>
+                        <div style={{ fontSize: '.68rem', color: 'var(--tx3)', marginTop: 4 }}>{lang === 'fr' ? 'Conversation réelle · Pas de coaching en direct' : 'Real conversation · Debrief at the end'}</div>
                       </div>
 
                       <div style={C.card({ marginBottom: 12 })}>
-                        <div style={C.label()}>{lang === 'fr' ? '// Configurer la Session' : '// Configure Session'}</div>
+                        <div style={C.label()}>{lang === 'fr' ? '// Session' : '// Session'}</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <FInp val={ivRole} set={setIvRole} ph={lang === 'fr' ? 'Poste cible (ex: Ingénieur ML)' : 'Target role (e.g. ML Engineer Intern)'} />
+                          <FInp val={ivRole} set={setIvRole} ph={lang === 'fr' ? 'Poste cible...' : 'Target role (e.g. ML Engineer Intern)'} />
                           <FInp val={ivCo} set={setIvCo} ph={lang === 'fr' ? 'Entreprise (optionnel)' : 'Company (optional)'} />
                           <FSel val={ivMode} set={v => setIvMode(v as IVMode)} opts={[
                             { value: 'mixed', label: tr('iv.mixed') + ' — Technical + Behavioral' },
-                            { value: 'technical', label: tr('iv.technical') + ' — Technical depth' },
+                            { value: 'technical', label: tr('iv.technical') + ' — Deep technical' },
                             { value: 'behavioral', label: tr('iv.behavioral') + ' — STAR format' },
                             { value: 'ml_deep', label: tr('iv.ml_deep') + ' — ML/AI Theory' },
                           ]} />
                         </div>
                       </div>
 
-                      {/* FIX 4: Input mode selector — voice or text */}
                       <div style={{ marginBottom: 14 }}>
-                        <div style={{ ...C.label(), marginBottom: 8 }}>{lang === 'fr' ? '// Mode de Réponse' : '// Response Mode'}</div>
+                        <div style={{ ...C.label(), marginBottom: 8 }}>{lang === 'fr' ? '// Mode' : '// Input Mode'}</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                           {([
                             ['text', '⌨️', lang === 'fr' ? 'Texte' : 'Text', lang === 'fr' ? 'Tapez vos réponses' : 'Type your answers'],
-                            ['voice', '🎤', lang === 'fr' ? 'Voix + IA Parle' : 'Voice + AI Speaks', lang === 'fr' ? 'Parlez — l\'IA répond oralement' : 'Speak — AI talks back'],
+                            ['voice', '🎤', lang === 'fr' ? 'Voix' : 'Voice', lang === 'fr' ? 'Parlez — IA répond oralement' : 'Speak — AI talks back'],
                           ] as [IVInputMode, string, string, string][]).map(([id, emoji, label, sub]) => (
                             <button key={id} onClick={() => setIvInputMode(id)} style={{
-                              padding: '16px 12px', borderRadius: 14, cursor: 'pointer', transition: 'all .18s', textAlign: 'left',
-                              border: `2px solid ${ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.6)' : 'rgba(77,159,255,.6)') : 'var(--bdr)'}`,
-                              background: ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.07)' : 'rgba(77,159,255,.07)') : 'var(--sf)',
+                              padding: '14px 12px', borderRadius: 14, cursor: 'pointer', transition: 'all .18s', textAlign: 'left',
+                              border: `2px solid ${ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.5)' : 'rgba(77,159,255,.5)') : 'var(--bdr)'}`,
+                              background: ivInputMode === id ? (id === 'voice' ? 'rgba(0,255,170,.06)' : 'rgba(77,159,255,.06)') : 'var(--sf)',
                             }}>
-                              <div style={{ fontSize: '1.6rem', marginBottom: 6 }}>{emoji}</div>
-                              <div style={{ fontSize: '.82rem', fontWeight: 700, color: ivInputMode === id ? (id === 'voice' ? 'var(--g)' : 'var(--b)') : 'var(--tx)' }}>{label}</div>
-                              <div style={{ fontSize: '.62rem', color: 'var(--tx3)', marginTop: 3, lineHeight: 1.4 }}>{sub}</div>
+                              <div style={{ fontSize: '1.4rem', marginBottom: 5 }}>{emoji}</div>
+                              <div style={{ fontSize: '.8rem', fontWeight: 700, color: ivInputMode === id ? (id === 'voice' ? 'var(--g)' : 'var(--b)') : 'var(--tx)' }}>{label}</div>
+                              <div style={{ fontSize: '.6rem', color: 'var(--tx3)', marginTop: 2, lineHeight: 1.4 }}>{sub}</div>
                             </button>
                           ))}
                         </div>
                       </div>
 
-                      <Btn v="g" full onClick={startIV} disabled={ivLoading}>
-                        {ivLoading
-                          ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Démarrage...' : 'Starting...'}</>
-                          : `🎤 ${tr('iv.start')}`}
+                      <Btn v="g" full onClick={startIV} disabled={ivLoading} style={{ marginBottom: 16 }}>
+                        {ivLoading ? <><span style={{ animation: 'spin .8s linear infinite', display: 'inline-block' }}>◈</span>&nbsp;{lang === 'fr' ? 'Démarrage...' : 'Starting...'}</> : `🎤 ${tr('iv.start')}`}
                       </Btn>
                     </div>
                   )}
 
-                  {/* ── ACTIVE PHASE — micro1-style ── */}
+                  {/* ── ACTIVE — clean chat, NO feedback cards ── */}
                   {ivPhase === 'active' && (
-                    <div style={{ animation: 'fadeUp .18s ease' }}>
-                      {/* Session header */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                      {/* Session bar */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0 }}>
                         <div style={{
-                          width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-                          background: ivLoading ? 'rgba(0,255,170,.15)' : 'rgba(0,255,170,.08)',
-                          border: `2px solid ${ivLoading ? 'var(--g)' : 'rgba(0,255,170,.3)'}`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem',
-                          animation: ivLoading ? 'aiPulse 1.2s ease infinite' : ivAISpeaking ? 'aiPulse 0.8s ease infinite' : 'none',
+                          width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                          background: 'rgba(0,255,170,.08)', border: `2px solid ${ivAISpeaking ? 'var(--g)' : ivLoading ? 'var(--g)' : 'rgba(0,255,170,.3)'}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem',
+                          animation: (ivLoading || ivAISpeaking) ? 'aiPulse 1s ease infinite' : 'none',
                         }}>🤖</div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '.8rem', fontWeight: 700 }}>{ivRole}{ivCo ? ` @ ${ivCo}` : ''}</div>
-                          <div style={{ fontSize: '.62rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
-                            Q{ivQNum}/{ivTotal} · {ivMode} · {ivInputMode === 'voice' ? '🎤' : '⌨️'}
+                          <div style={{ fontSize: '.76rem', fontWeight: 700 }}>{ivRole}{ivCo ? ` @ ${ivCo}` : ''}</div>
+                          <div style={{ fontSize: '.58rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
+                            {ivAISpeaking ? (lang === 'fr' ? '● Speaking...' : '● Speaking...') : `Q${ivQNum}/${ivTotal} · ${ivMode}`}
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {/* Toggle input mode mid-interview */}
-                          <button onClick={() => {
-                            const next: IVInputMode = ivInputMode === 'text' ? 'voice' : 'text';
-                            if (next === 'text') { stopVoice(); stopSpeaking(); }
-                            setIvInputMode(next);
-                          }} style={{
-                            width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--bdr2)',
-                            background: ivInputMode === 'voice' ? 'rgba(0,255,170,.1)' : 'var(--sf)',
-                            color: ivInputMode === 'voice' ? 'var(--g)' : 'var(--tx3)',
-                            cursor: 'pointer', fontSize: '.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}>
-                            {ivInputMode === 'voice' ? '🎤' : '⌨️'}
-                          </button>
-                          <button onClick={resetIV} style={{
-                            padding: '0 12px', height: 34, borderRadius: 8, border: '1px solid rgba(255,77,109,.25)',
-                            background: 'rgba(255,77,109,.08)', color: 'var(--r)', cursor: 'pointer', fontSize: '.7rem', fontWeight: 600,
-                          }}>{tr('iv.end')}</button>
-                        </div>
+                        <button onClick={() => {
+                          const next: IVInputMode = ivInputMode === 'text' ? 'voice' : 'text';
+                          if (next === 'text') { stopVoice(); stopSpeaking(); }
+                          setIvInputMode(next);
+                        }} style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--bdr2)', background: ivInputMode === 'voice' ? 'rgba(0,255,170,.1)' : 'var(--sf)', color: ivInputMode === 'voice' ? 'var(--g)' : 'var(--tx3)', cursor: 'pointer', fontSize: '.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {ivInputMode === 'voice' ? '🎤' : '⌨️'}
+                        </button>
+                        <button onClick={resetIV} style={{ padding: '0 10px', height: 30, borderRadius: 8, border: '1px solid rgba(255,77,109,.25)', background: 'rgba(255,77,109,.08)', color: 'var(--r)', cursor: 'pointer', fontSize: '.66rem', fontWeight: 600 }}>
+                          {tr('iv.end')}
+                        </button>
                       </div>
 
-                      {/* Progress bar */}
-                      <div style={{ marginBottom: 12 }}>
-                        <PBar val={(ivQNum / ivTotal) * 100} color="var(--g)" />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                          <span style={{ fontSize: '.56rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
-                            {ivQNum > 0 ? `Q${ivQNum} ${lang === 'fr' ? 'en cours' : 'in progress'}` : ''}
-                          </span>
-                          <span style={{ fontSize: '.56rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
-                            {Math.round((ivQNum / ivTotal) * 100)}%
-                          </span>
-                        </div>
-                      </div>
+                      {/* Progress */}
+                      <PBar val={(ivQNum / ivTotal) * 100} color="var(--g)" style={{ marginBottom: 10, flexShrink: 0 }} />
 
-                      {/* AI speaking indicator */}
-                      {ivAISpeaking && (
-                        <div style={{ marginBottom: 8 }}>
-                          <AISpeaking speaking={ivAISpeaking} />
-                        </div>
-                      )}
-
-                      {/* Chat log */}
-                      <div ref={ivChatRef} style={{
-                        maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column',
-                        gap: 14, marginBottom: 12, padding: '2px 0', scrollbarWidth: 'thin',
-                      }}>
+                      {/* Chat — scrollable, clean bubbles only */}
+                      <div ref={ivChatRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 8, scrollbarWidth: 'none' }}>
                         {ivHistory.map((msg, i) => {
                           const isUser = msg.role === 'user';
-                          const meta = msg.meta;
                           return (
                             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexDirection: isUser ? 'row-reverse' : 'row' }}>
-                                <div style={{
-                                  width: 26, height: 26, borderRadius: '50%',
-                                  background: isUser ? 'rgba(77,159,255,.15)' : 'rgba(0,255,170,.12)',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.75rem',
-                                  border: `1px solid ${isUser ? 'rgba(77,159,255,.3)' : 'rgba(0,255,170,.3)'}`,
-                                }}>{isUser ? '👤' : '🤖'}</div>
-                                <span style={{ fontSize: '.6rem', color: 'var(--tx3)', fontFamily: 'var(--mono)' }}>
-                                  {isUser ? (lang === 'fr' ? 'Vous' : 'You') : 'AI Interviewer'}
-                                </span>
+                              <div style={{ fontSize: '.58rem', color: 'var(--tx3)', fontFamily: 'var(--mono)', marginBottom: 4, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
+                                {isUser ? (lang === 'fr' ? 'Vous' : 'You') : 'Interviewer'}
                               </div>
-
                               <div style={{
-                                maxWidth: '88%', padding: '13px 15px', lineHeight: 1.7, fontSize: '.82rem',
-                                borderRadius: isUser ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-                                background: isUser ? 'rgba(77,159,255,.12)' : 'var(--sf)',
-                                border: isUser ? '1px solid rgba(77,159,255,.22)' : '1px solid var(--bdr)',
-                                color: isUser ? 'var(--tx)' : 'var(--tx2)',
+                                maxWidth: '86%', padding: '11px 14px', lineHeight: 1.65, fontSize: '.84rem',
+                                borderRadius: isUser ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
+                                background: isUser ? 'rgba(77,159,255,.13)' : 'var(--sf)',
+                                border: isUser ? '1px solid rgba(77,159,255,.2)' : '1px solid var(--bdr)',
+                                color: 'var(--tx2)',
                               }}>{msg.content}</div>
-
-                              {/* Question tags */}
-                              {(!isUser && !!meta?.next_question) ? (() => {
-                                const nq = meta!.next_question as Record<string, unknown>;
-                                return (
-                                  <div style={{ maxWidth: '90%', marginTop: 5, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                    {!!nq.category && <span style={{ padding: '2px 9px', background: 'rgba(77,159,255,.1)', borderRadius: 20, fontSize: '.6rem', color: 'var(--b)', fontFamily: 'var(--mono)' }}>{String(nq.category)}</span>}
-                                    {!!nq.difficulty && <span style={{ padding: '2px 9px', background: 'rgba(168,85,247,.1)', borderRadius: 20, fontSize: '.6rem', color: 'var(--p)', fontFamily: 'var(--mono)' }}>{String(nq.difficulty)}</span>}
-                                    {!!nq.tips && <span style={{ padding: '2px 9px', background: 'rgba(255,214,10,.08)', borderRadius: 20, fontSize: '.6rem', color: 'var(--y)', fontFamily: 'var(--mono)', maxWidth: '100%' }}>💡 {String(nq.tips)}</span>}
-                                  </div>
-                                );
-                              })() : null}
-
-                              {/* Feedback card */}
-                              {(!isUser && !!meta?.feedback) ? (() => {
-                                const fb = meta!.feedback as Record<string, unknown>;
-                                const score = fb.score as number;
-                                return (
-                                  <div style={{ maxWidth: '96%', marginTop: 8, background: 'var(--bg3)', border: '1px solid var(--bdr2)', borderRadius: 14, padding: 13 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                                      <div style={{ fontFamily: 'var(--mono)', fontSize: '.65rem', color: scoreCol(score * 10), fontWeight: 700 }}>
-                                        {score}/10 — {String(fb.scoreLabel || '')}
-                                      </div>
-                                      <div style={{ flex: 1, display: 'flex', gap: 2 }}>
-                                        {Array.from({ length: 10 }).map((_, n) => (
-                                          <div key={n} style={{ flex: 1, height: 4, borderRadius: 2, background: n < score ? scoreCol(score * 10) : 'var(--bdr2)', transition: 'background .3s' }} />
-                                        ))}
-                                      </div>
-                                    </div>
-                                    {(fb.what_went_well as string[] || []).map((s, j) => (
-                                      <div key={j} style={{ fontSize: '.72rem', color: 'var(--g)', marginBottom: 3, display: 'flex', gap: 5 }}><span>✓</span><span>{s}</span></div>
-                                    ))}
-                                    {(fb.improvements as string[] || []).map((s, j) => (
-                                      <div key={j} style={{ fontSize: '.72rem', color: 'var(--y)', marginBottom: 3, display: 'flex', gap: 5 }}><span>▲</span><span>{s}</span></div>
-                                    ))}
-                                    {!!fb.model_answer_hint && (
-                                      <div style={{ fontSize: '.7rem', color: 'var(--tx3)', marginTop: 8, padding: '8px 10px', background: 'var(--sf2)', borderRadius: 8, borderLeft: '2px solid var(--b)', lineHeight: 1.6 }}>
-                                        💡 {String(fb.model_answer_hint)}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })() : null}
                             </div>
                           );
                         })}
                         {ivLoading && (
-                          <div style={{ paddingLeft: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,255,170,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.75rem', border: '1px solid rgba(0,255,170,.3)', animation: 'aiPulse 1.2s ease infinite' }}>🤖</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+                            <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(0,255,170,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.7rem', border: '1px solid rgba(0,255,170,.25)', animation: 'aiPulse 1s ease infinite' }}>🤖</div>
                             <Dots />
                           </div>
                         )}
                       </div>
 
-                      {/* ── TEXT MODE answer area ── */}
-                      {!ivLoading && ivInputMode === 'text' && (
-                        <div style={{ background: 'var(--sf)', border: '1px solid var(--bdr2)', borderRadius: 18, padding: 14 }}>
-                          <FTA
-                            val={ivAnswer}
-                            set={setIvAnswer}
-                            ph={lang === 'fr' ? 'Tapez votre réponse ici...' : 'Type your answer here...'}
-                            rows={3}
-                            style={{ marginBottom: 10, borderRadius: 12 }}
-                          />
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <Btn v="ghost" sm onClick={() => setIvAnswer('')}>✕</Btn>
-                            <Btn v="g" style={{ flex: 1 }} onClick={submitIVAnswer} disabled={!ivAnswer.trim()}>
-                              {tr('iv.submit')} →
-                            </Btn>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* FIX 4: VOICE MODE — micro1-style full voice UI */}
-                      {!ivLoading && ivInputMode === 'voice' && (
-                        <div style={{ background: 'var(--sf)', border: `1px solid ${ivVoiceActive ? 'rgba(255,77,109,.4)' : 'var(--bdr2)'}`, borderRadius: 20, padding: '20px 16px', transition: 'border-color .3s' }}>
-                          {/* Centered mic with ripple */}
-                          <div style={{ textAlign: 'center', marginBottom: 14 }}>
-                            <div style={{ position: 'relative', width: 90, height: 90, margin: '0 auto 12px' }}>
-                              {ivVoiceActive && (
-                                <>
-                                  <div style={{ position: 'absolute', inset: -8, borderRadius: '50%', border: '2px solid rgba(255,77,109,.3)', animation: 'ripple 1.2s ease infinite' }} />
-                                  <div style={{ position: 'absolute', inset: -4, borderRadius: '50%', border: '2px solid rgba(255,77,109,.4)', animation: 'ripple 1.2s ease .3s infinite' }} />
-                                </>
+                      {/* Input area */}
+                      {!ivLoading && (
+                        <div style={{ flexShrink: 0, paddingTop: 8, paddingBottom: 8 }}>
+                          {ivInputMode === 'text' ? (
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', background: 'var(--sf)', border: '1px solid var(--bdr2)', borderRadius: 16, padding: '10px 12px' }}>
+                              <textarea value={ivAnswer} onChange={e => setIvAnswer(e.target.value)}
+                                placeholder={lang === 'fr' ? 'Votre réponse...' : 'Your answer...'}
+                                rows={2}
+                                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (ivAnswer.trim()) submitIVAnswer(); } }}
+                                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontFamily: 'var(--sans)', fontSize: '.84rem', color: 'var(--tx)', lineHeight: 1.5, minHeight: 44 }} />
+                              <button onClick={submitIVAnswer} disabled={!ivAnswer.trim()} style={{ width: 38, height: 38, borderRadius: 12, border: 'none', background: ivAnswer.trim() ? 'var(--g)' : 'var(--sf2)', color: ivAnswer.trim() ? '#000' : 'var(--tx3)', cursor: ivAnswer.trim() ? 'pointer' : 'not-allowed', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>↑</button>
+                            </div>
+                          ) : (
+                            <div style={{ background: 'var(--sf)', border: `1px solid ${ivVoiceActive ? 'rgba(255,77,109,.35)' : 'var(--bdr2)'}`, borderRadius: 18, padding: '14px 16px', transition: 'border-color .2s' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: (ivAnswer || voiceTranscript) ? 10 : 0 }}>
+                                <div style={{ position: 'relative' }}>
+                                  {ivVoiceActive && <div style={{ position: 'absolute', inset: -6, borderRadius: '50%', border: '2px solid rgba(255,77,109,.3)', animation: 'ripple 1s ease infinite' }} />}
+                                  <button onClick={ivVoiceActive ? stopVoice : startVoice} style={{
+                                    width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', position: 'relative',
+                                    background: ivVoiceActive ? 'radial-gradient(circle,rgba(255,77,109,.3),rgba(255,77,109,.1))' : 'radial-gradient(circle,rgba(0,255,170,.2),rgba(0,255,170,.05))',
+                                    fontSize: '1.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    animation: ivVoiceActive ? 'voicePulse 1.2s ease infinite' : 'none',
+                                  }}>{ivVoiceActive ? '⏹️' : '🎤'}</button>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: '.76rem', fontWeight: 600, color: ivVoiceActive ? 'var(--r)' : ivAISpeaking ? 'var(--g)' : 'var(--tx3)' }}>
+                                    {ivVoiceActive ? '🔴 Listening...' : ivAISpeaking ? '🟢 AI speaking...' : 'Tap to speak'}
+                                  </div>
+                                  <VoiceWave active={ivVoiceActive} />
+                                </div>
+                                <button onClick={submitIVAnswer} disabled={(!ivAnswer.trim() && !voiceTranscript.trim()) || ivVoiceActive} style={{ width: 38, height: 38, borderRadius: 12, border: 'none', background: (ivAnswer.trim() || voiceTranscript.trim()) && !ivVoiceActive ? 'var(--g)' : 'var(--sf2)', color: (ivAnswer.trim() || voiceTranscript.trim()) && !ivVoiceActive ? '#000' : 'var(--tx3)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>↑</button>
+                              </div>
+                              {(ivAnswer || voiceTranscript) && (
+                                <div style={{ fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.5, padding: '8px 10px', background: 'var(--bg3)', borderRadius: 10, maxHeight: 70, overflowY: 'auto' }}>
+                                  {ivAnswer || voiceTranscript}
+                                  {ivVoiceActive && <span style={{ display: 'inline-block', width: 7, height: 13, background: 'var(--r)', borderRadius: 2, marginLeft: 3, animation: 'dotpulse .8s ease infinite', verticalAlign: 'middle' }} />}
+                                </div>
                               )}
-                              <button
-                                onClick={ivVoiceActive ? stopVoice : startVoice}
-                                style={{
-                                  width: 90, height: 90, borderRadius: '50%', border: 'none', cursor: 'pointer',
-                                  background: ivVoiceActive
-                                    ? 'radial-gradient(circle, rgba(255,77,109,.25), rgba(255,77,109,.1))'
-                                    : 'radial-gradient(circle, rgba(0,255,170,.15), rgba(0,255,170,.05))',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.2rem',
-                                  transition: 'all .25s',
-                                  animation: ivVoiceActive ? 'voicePulse 1.2s ease infinite' : 'none',
-                                  outline: 'none', position: 'relative',
-                                }}>
-                                {ivVoiceActive ? '⏹️' : '🎤'}
-                              </button>
-                            </div>
-
-                            {/* Status text */}
-                            <div style={{ fontSize: '.78rem', fontWeight: 700, color: ivVoiceActive ? 'var(--r)' : 'var(--tx3)', marginBottom: 8 }}>
-                              {ivVoiceActive
-                                ? (lang === 'fr' ? '🔴 En écoute...' : '🔴 Listening...')
-                                : ivAISpeaking
-                                  ? (lang === 'fr' ? '🤖 IA parle...' : '🤖 AI speaking...')
-                                  : (lang === 'fr' ? 'Appuyez pour parler' : 'Tap mic to speak')}
-                            </div>
-
-                            {/* Animated wave */}
-                            <VoiceWave active={ivVoiceActive} />
-                          </div>
-
-                          {/* Live transcript */}
-                          {(ivAnswer || voiceTranscript) && (
-                            <div style={{
-                              margin: '0 0 12px', padding: '10px 14px',
-                              background: 'var(--bg3)', borderRadius: 12,
-                              border: `1px solid ${ivVoiceActive ? 'rgba(255,77,109,.2)' : 'var(--bdr)'}`,
-                              fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.6,
-                              maxHeight: 80, overflowY: 'auto',
-                              transition: 'border-color .3s',
-                            }}>
-                              {ivAnswer || voiceTranscript}
-                              {ivVoiceActive && <span style={{ display: 'inline-block', width: 8, height: 14, background: 'var(--r)', borderRadius: 2, marginLeft: 3, animation: 'dotpulse 0.8s ease infinite', verticalAlign: 'middle' }} />}
-                            </div>
-                          )}
-
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <Btn v="ghost" sm onClick={() => { setIvAnswer(''); setVoiceTranscript(''); stopVoice(); }} disabled={!ivAnswer && !voiceTranscript}>
-                              ✕ {lang === 'fr' ? 'Effacer' : 'Clear'}
-                            </Btn>
-                            <Btn v="g" style={{ flex: 1 }} onClick={submitIVAnswer} disabled={(!ivAnswer.trim() && !voiceTranscript.trim()) || ivVoiceActive}>
-                              {ivVoiceActive
-                                ? (lang === 'fr' ? 'Arrêtez puis envoyez' : 'Stop then submit')
-                                : `${tr('iv.submit')} →`}
-                            </Btn>
-                          </div>
-
-                          {ivVoiceActive && (
-                            <div style={{ textAlign: 'center', marginTop: 10, fontSize: '.65rem', color: 'var(--tx3)' }}>
-                              {lang === 'fr' ? 'Arrêtez l\'enregistrement pour pouvoir envoyer' : 'Stop recording first, then submit your answer'}
                             </div>
                           )}
                         </div>
@@ -1595,88 +1447,77 @@ export default function GCareers() {
                     </div>
                   )}
 
-                  {/* ── COMPLETE PHASE ── */}
+                  {/* ── COMPLETE ── */}
                   {ivPhase === 'complete' && (
-                    <div style={C.card()}>
-                      <div style={C.label()}>🏁 {lang === 'fr' ? 'Session Terminée' : 'Session Complete'}</div>
-                      {!ivFinal ? (
-                        <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                          <Dots />
-                          <div style={{ fontSize: '.76rem', color: 'var(--tx3)', marginTop: 10 }}>
-                            {lang === 'fr' ? 'Génération du rapport final...' : 'Generating your final report...'}
+                    <div style={{ overflowY: 'auto', flex: 1 }}>
+                      <div style={C.card({ marginBottom: 12 })}>
+                        <div style={C.label()}>🏁 {lang === 'fr' ? 'Session Terminée' : 'Interview Complete'}</div>
+                        {!ivFinal ? (
+                          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                            <Dots />
+                            <div style={{ fontSize: '.76rem', color: 'var(--tx3)', marginTop: 10 }}>{lang === 'fr' ? 'Génération du rapport...' : 'Generating debrief...'}</div>
                           </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ textAlign: 'center', marginBottom: 18, padding: '10px 0' }}>
-                            <div style={{ fontSize: '3.2rem', fontWeight: 800, fontFamily: 'var(--sans)', color: scoreCol((ivFinal.overall_score as number) || 0), lineHeight: 1 }}>
-                              {String(ivFinal.grade || 'B')}
+                        ) : (
+                          <>
+                            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                              <div style={{ fontSize: '3rem', fontWeight: 800, fontFamily: 'var(--sans)', color: scoreCol((ivFinal.overall_score as number) || 0), lineHeight: 1 }}>{String(ivFinal.grade || 'B')}</div>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, marginTop: 3 }}>{String(ivFinal.overall_score || 0)}%</div>
+                              <div style={{ fontSize: '.74rem', color: 'var(--tx3)', marginTop: 4 }}>{String(ivFinal.verdict || '')}</div>
                             </div>
-                            <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 4 }}>{String(ivFinal.overall_score || 0)}%</div>
-                            <div style={{ fontSize: '.78rem', color: 'var(--tx3)', marginTop: 6 }}>{String(ivFinal.verdict || '')}</div>
-                          </div>
-
-                          {ivFinal.category_scores && (
-                            <div style={{ marginBottom: 14 }}>
-                              {Object.entries(ivFinal.category_scores as Record<string, number>).map(([k, v]) => (
-                                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                  <span style={{ fontSize: '.7rem', color: 'var(--tx2)', width: 120, flexShrink: 0, textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</span>
-                                  <PBar val={v} color={scoreCol(v)} />
-                                  <span style={{ fontFamily: 'var(--mono)', fontSize: '.62rem', color: 'var(--tx2)', width: 28, textAlign: 'right' }}>{v}%</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-                            <div>
-                              <div style={{ fontSize: '.62rem', color: 'var(--g)', fontFamily: 'var(--mono)', marginBottom: 6 }}>✓ {lang === 'fr' ? 'Forces' : 'Strengths'}</div>
-                              {(ivFinal.top_strengths as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.74rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '.62rem', color: 'var(--o)', fontFamily: 'var(--mono)', marginBottom: 6 }}>▲ {lang === 'fr' ? 'À améliorer' : 'Improve'}</div>
-                              {(ivFinal.priority_improvements as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.74rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
-                            </div>
-                          </div>
-
-                          {ivFinal.coaching_summary && (
-                            <div style={{ fontSize: '.76rem', color: 'var(--tx2)', lineHeight: 1.75, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 8, borderLeft: '2px solid var(--b)', marginBottom: 14 }}>
-                              {String(ivFinal.coaching_summary)}
-                            </div>
-                          )}
-
-                          {(ivFinal.study_topics as string[] || []).length > 0 && (
-                            <div style={{ marginBottom: 14 }}>
-                              <div style={{ fontSize: '.62rem', color: 'var(--p)', fontFamily: 'var(--mono)', marginBottom: 8 }}>📚 {lang === 'fr' ? 'Sujets à réviser' : 'Study These Topics'}</div>
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                {(ivFinal.study_topics as string[]).map((s, i) => (
-                                  <button key={i} onClick={() => { setStQuery(s); goPage('study'); }}
-                                    style={{ padding: '5px 12px', borderRadius: 20, fontFamily: 'var(--mono)', fontSize: '.62rem', background: 'rgba(168,85,247,.1)', border: '1px solid rgba(168,85,247,.3)', color: 'var(--p)', cursor: 'pointer' }}>
-                                    {s}
-                                  </button>
+                            {ivFinal.category_scores && (
+                              <div style={{ marginBottom: 14 }}>
+                                {Object.entries(ivFinal.category_scores as Record<string, number>).map(([k, v]) => (
+                                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                                    <span style={{ fontSize: '.68rem', color: 'var(--tx2)', width: 110, flexShrink: 0, textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</span>
+                                    <PBar val={v} color={scoreCol(v)} />
+                                    <span style={{ fontFamily: 'var(--mono)', fontSize: '.6rem', color: 'var(--tx2)', width: 26, textAlign: 'right' }}>{v}%</span>
+                                  </div>
                                 ))}
                               </div>
+                            )}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                              <div>
+                                <div style={{ fontSize: '.6rem', color: 'var(--g)', fontFamily: 'var(--mono)', marginBottom: 6 }}>✓ {lang === 'fr' ? 'Forces' : 'Strengths'}</div>
+                                {(ivFinal.top_strengths as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.72rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '.6rem', color: 'var(--o)', fontFamily: 'var(--mono)', marginBottom: 6 }}>▲ {lang === 'fr' ? 'À améliorer' : 'Improve'}</div>
+                                {(ivFinal.priority_improvements as string[] || []).map((s, i) => <div key={i} style={{ fontSize: '.72rem', color: 'var(--tx2)', marginBottom: 4 }}>• {s}</div>)}
+                              </div>
                             </div>
-                          )}
-
-                          {ivFinal.hiring_recommendation && (
-                            <div style={{ padding: '9px 12px', background: 'rgba(0,255,170,.05)', border: '1px solid rgba(0,255,170,.2)', borderRadius: 10, fontSize: '.74rem', color: 'var(--g)', marginBottom: 14 }}>
-                              🎯 {String(ivFinal.hiring_recommendation)}
-                            </div>
-                          )}
-
-                          <Btn v="g" full onClick={resetIV}>{tr('iv.new')}</Btn>
-                        </>
-                      )}
+                            {ivFinal.coaching_summary && (
+                              <div style={{ fontSize: '.74rem', color: 'var(--tx2)', lineHeight: 1.75, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 8, borderLeft: '2px solid var(--b)', marginBottom: 14 }}>
+                                {String(ivFinal.coaching_summary)}
+                              </div>
+                            )}
+                            {(ivFinal.study_topics as string[] || []).length > 0 && (
+                              <div style={{ marginBottom: 14 }}>
+                                <div style={{ fontSize: '.6rem', color: 'var(--p)', fontFamily: 'var(--mono)', marginBottom: 8 }}>📚 {lang === 'fr' ? 'Sujets à réviser' : 'Study Topics'}</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                  {(ivFinal.study_topics as string[]).map((s, i) => (
+                                    <button key={i} onClick={() => { setStQuery(s); goPage('study'); }} style={{ padding: '4px 10px', borderRadius: 20, fontFamily: 'var(--mono)', fontSize: '.6rem', background: 'rgba(168,85,247,.1)', border: '1px solid rgba(168,85,247,.3)', color: 'var(--p)', cursor: 'pointer' }}>{s}</button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {ivFinal.hiring_recommendation && (
+                              <div style={{ padding: '8px 12px', background: 'rgba(0,255,170,.05)', border: '1px solid rgba(0,255,170,.2)', borderRadius: 10, fontSize: '.72rem', color: 'var(--g)', marginBottom: 14 }}>
+                                🎯 {String(ivFinal.hiring_recommendation)}
+                              </div>
+                            )}
+                            <Btn v="g" full onClick={resetIV}>{tr('iv.new')}</Btn>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
-                </>
+                </div>
               )}
 
               {/* ── BANK TAB ── */}
               {ivTab === 'bank' && (
-                <>
-                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', marginBottom: 14, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' as never }}>
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', marginBottom: 14, scrollbarWidth: 'none' }}>
                     {(['technical', 'behavioral', 'ml'] as Array<keyof typeof QBANK>).map(tab => (
                       <button key={tab} onClick={() => setIvBankTab(tab)} style={{
                         padding: '7px 16px', borderRadius: 20, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
@@ -1694,13 +1535,13 @@ export default function GCareers() {
                       {customQ.map((q, i) => <QCard key={q.id} q={q.question} a={q.answer} tags={q.tags} onDelete={() => { setCustomQ(prev => prev.filter((_, j) => j !== i)); showToast('Deleted'); }} />)}
                     </>
                   )}
-                  <div style={C.card({ marginTop: 14 })}>
+                  <div style={C.card({ marginTop: 14, marginBottom: 16 })}>
                     <div style={C.label()}>{lang === 'fr' ? '// Ajouter une Question' : '// Add Custom Question'}</div>
                     <FTA val={cqQ} set={setCqQ} ph={lang === 'fr' ? 'Votre question...' : 'Your question...'} rows={2} style={{ minHeight: 56, marginBottom: 8 }} />
                     <FTA val={cqA} set={setCqA} ph={lang === 'fr' ? 'Votre réponse / notes...' : 'Answer / notes...'} rows={3} style={{ minHeight: 72, marginBottom: 10 }} />
                     <Btn v="g" sm onClick={saveCustomQ}>{lang === 'fr' ? 'Sauvegarder' : 'Save Question'}</Btn>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}
@@ -1912,17 +1753,17 @@ export default function GCareers() {
 
         </div>{/* /scroll */}
 
-        {/* Bottom nav — fixed to bottom, no bounce */}
+        {/* Bottom nav */}
         <nav style={{
           background: 'var(--bg2)',
           borderTop: '1px solid var(--bdr)',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
+          paddingTop: 8,
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)',
           flexShrink: 0,
           zIndex: 100,
-          minHeight: 60,
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          overscrollBehavior: 'none',
+          touchAction: 'none',
         }}>
           {NAV.map(item => (
             <button key={item.id} onClick={() => goPage(item.id)} style={{
