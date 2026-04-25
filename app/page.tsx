@@ -509,47 +509,76 @@ export default function GCareers() {
     }
   }, []);
 
-  // STT — start voice recognition
-  const startVoice = useCallback(() => {
+  // STT — MediaRecorder → Whisper (reliable cross-browser) with Web Speech API on desktop
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startVoice = useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { showToast('⚠ Voice not supported in this browser'); return; }
-    if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch { /* ignore */ } }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rec = new SR() as any;
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
-
-    let finalText = '';
-    rec.onstart = () => setIvVoiceActive(true);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rec.onresult = (e: any) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
-        else interim = e.results[i][0].transcript;
-      }
-      const combined = (finalText + interim).trim();
-      setVoiceTranscript(combined);
-      setIvAnswer(combined);
-    };
-
-    rec.onerror = () => { setIvVoiceActive(false); };
-    rec.onend = () => { setIvVoiceActive(false); };
-
-    rec.start();
-    recognitionRef.current = rec;
-    setIvVoiceActive(true);
-    setVoiceTranscript('');
+    // Use Web Speech API on desktop Chrome/Edge, Whisper elsewhere
+    const useWebSpeech = SR && /Chrome|Edge/.test(navigator.userAgent) && !/Mobile/.test(navigator.userAgent);
+    if (useWebSpeech) {
+      if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch { /* ignore */ } }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rec = new SR() as any;
+      rec.continuous = true; rec.interimResults = true;
+      rec.lang = lang === 'fr' ? 'fr-FR' : 'en-US';
+      let finalText = '';
+      rec.onstart = () => setIvVoiceActive(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rec.onresult = (e: any) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+          else interim = e.results[i][0].transcript;
+        }
+        const combined = (finalText + interim).trim();
+        setVoiceTranscript(combined); setIvAnswer(combined);
+      };
+      rec.onerror = () => setIvVoiceActive(false);
+      rec.onend = () => setIvVoiceActive(false);
+      rec.start(); recognitionRef.current = rec;
+      setIvVoiceActive(true); setVoiceTranscript('');
+    } else {
+      // Whisper via MediaRecorder — works on all browsers including Safari/iOS
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+        const mr = new MediaRecorder(stream, { mimeType });
+        audioChunksRef.current = [];
+        mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+        mr.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          setVoiceTranscript(lang === 'fr' ? '⏳ Transcription...' : '⏳ Transcribing...');
+          try {
+            const blob = new Blob(audioChunksRef.current, { type: mimeType });
+            const form = new FormData();
+            form.append('file', blob, mimeType === 'audio/webm' ? 'rec.webm' : 'rec.mp4');
+            form.append('model', 'whisper-large-v3');
+            form.append('language', lang === 'fr' ? 'fr' : 'en');
+            const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+            const data = await res.json();
+            const t = data.text?.trim() || '';
+            if (t) { setVoiceTranscript(t); setIvAnswer(t); }
+            else { setVoiceTranscript(''); showToast('⚠ No speech detected'); }
+          } catch { setVoiceTranscript(''); showToast('⚠ Transcription failed'); }
+          setIvVoiceActive(false);
+        };
+        mr.start(); mediaRecorderRef.current = mr;
+        setIvVoiceActive(true); setVoiceTranscript(lang === 'fr' ? '🎤 Enregistrement...' : '🎤 Recording...');
+      } catch { showToast('⚠ Microphone access denied'); }
+    }
   }, [lang, showToast]);
 
   const stopVoice = useCallback(() => {
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch { /* ignore */ }
       recognitionRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
     }
     setIvVoiceActive(false);
   }, []);
@@ -604,7 +633,7 @@ export default function GCareers() {
       });
       const d = await r.json();
       if (d.success) {
-        const isComplete = d.data.type === 'wrap_up' || d.data.sessionComplete === true;
+        const isComplete = d.data.type === 'complete' || d.data.type === 'wrap_up' || d.data.isComplete === true || d.data.sessionComplete === true;
         // isFollowUp: keep question counter the same
         const isFollowUp = d.data.isFollowUp === true;
         const content = d.data.message || '';
